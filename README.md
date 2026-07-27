@@ -41,66 +41,85 @@
 
 ---
 
-## 🏗️ Architecture & Project Structure
+## 🏗️ Architecture & Extension Output Structure
 
 ```
-/public
-  /icons
-    icon16.png
-    icon32.png
-    icon48.png
-    icon128.png
-    icon.svg
-/src
-  /background
-    serviceWorker.ts      # Chrome extension background worker
-  /content
-    contentScript.ts      # Webpage & YouTube overlay script
-  /components
-    Header.tsx            # Global navigation & Euclid connection status
-    DestinationPicker.tsx # Notebook, folder, and tag picker
-    ClippingWorkspace.tsx # Primary clipping form & live article preview
-    VideoNotesWorkspace.tsx # YouTube timestamped note workspace
-    ScreenshotAnnotationSuite.tsx # Screenshot editor & annotation tools
-    DashboardView.tsx     # Full extension clips library & search
-    SettingsView.tsx      # Euclid ID connection & template settings
-    OnboardingModal.tsx   # First-run interactive guide
-  /services
-    clippingService.ts    # Article extractor & Markdown converter
-    firebaseService.ts    # Firestore & Firebase Storage integration
-  /storage
-    indexedDB.ts          # Offline local IndexedDB database
-  /types
-    index.ts              # Domain types for Euclid ecosystem
-manifest.json             # Manifest V3 extension configuration
-firestore.rules           # Security rules for Cloud Firestore
-storage.rules             # Security rules for Firebase Storage
-firebase-blueprint.json   # Intermediate blueprint schema
+dist/
+├── manifest.json              # Extension Manifest V3 configuration
+├── popup.html                 # Main compact clipping extension popup
+├── sidepanel.html             # Chrome Side Panel interface
+├── index.html                 # Full-screen extension dashboard
+├── service-worker.js          # Background service worker (bundled ESM)
+├── contentScript.js           # Page injection & DOM extractor (bundled JS)
+├── icons/
+│   ├── icon16.png             # 16x16 PNG extension icon
+│   ├── icon32.png             # 32x32 PNG extension icon
+│   ├── icon48.png             # 48x48 PNG extension icon
+│   ├── icon128.png            # 128x128 PNG extension icon
+│   └── icon512.png           # 512x512 PNG extension icon
+└── assets/                    # Bundled React application assets
 ```
 
 ---
 
-## 🚀 Development & Build Instructions
+## 🚀 How to Install and Load Unpacked Extension in Chrome
 
-### 1. Install Dependencies
-```bash
-npm install
-```
+Follow these exact steps to build and load Euclid Smart Clipper into Google Chrome:
 
-### 2. Run Development Server
-```bash
-npm run dev
-```
+1. **Open the project folder** in your terminal or editor.
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+3. **Run the production build script:**
+   ```bash
+   npm run build
+   ```
+   *This automatically generates icon PNGs, bundles Vite app pages, compiles `service-worker.js` & `contentScript.js` with `esbuild`, copies `manifest.json`, and verifies all extension files via `scripts/verify-extension-build.mjs`.*
 
-### 3. Build Extension for Chrome Web Store
-```bash
-npm run build
-```
+4. **Open Chrome Extensions Manager:**
+   Navigate to `chrome://extensions` in your Google Chrome browser.
 
-### 4. Load Unpacked Extension in Chrome
-1. Open Google Chrome and navigate to `chrome://extensions`.
-2. Enable **Developer mode** in the top right.
-3. Click **Load unpacked** and select the root directory (or build output).
+5. **Enable Developer Mode:**
+   Toggle on the **Developer mode** switch in the upper-right corner of the `chrome://extensions` page.
+
+6. **Click "Load unpacked":**
+   Click the **Load unpacked** button in the top-left toolbar.
+
+7. **Select the generated `dist` directory:**
+   Navigate to the project directory and **select the `dist` folder** (NOT the parent folder or source folder).
+
+8. **Confirm Successful Load:**
+   Confirm that **Euclid Smart Clipper** appears with its official green-and-yellow icon, version `1.0.0`, and active background service worker without any red error buttons.
+
+9. **Pin Extension:**
+   Click the puzzle piece icon (Extensions menu) in Chrome's top bar and click the pin icon next to **Euclid Smart Clipper**.
+
+---
+
+## 🔧 Troubleshooting Common Extension Loading Errors
+
+If Chrome shows an error when attempting to load the unpacked extension, consult the solutions below:
+
+### 1. "Could not load manifest" or "Manifest file is missing or unreadable"
+- **Cause:** You selected the parent directory or root source folder instead of the `dist` folder.
+- **Fix:** In `chrome://extensions` -> **Load unpacked**, make sure you select the **`dist/`** directory. The `dist/` directory directly contains `manifest.json`.
+
+### 2. "Nested Downloaded Folders"
+- **Cause:** If you unzipped a downloaded archive, you may have nested folders like `Chrome-Extension-Euclid-Smart-Clipper--main/Chrome-Extension-Euclid-Smart-Clipper--main/`.
+- **Fix:** Ensure you navigate into the innermost project root directory, run `npm run build`, and then select `dist/`.
+
+### 3. "Could not load icon 'icons/icon16.png' specified in 'icons'"
+- **Cause:** Missing PNG files, incorrect pathing, or capitalization mismatch.
+- **Fix:** Run `npm run build` again. The build script automatically executes `node generate-pngs.js` to ensure `dist/icons/icon16.png`, `icon32.png`, `icon48.png`, and `icon128.png` are produced and verified.
+
+### 4. "Service Worker registration failed"
+- **Cause:** Service worker file missing or syntax error.
+- **Fix:** Ensure `npm run build` completed cleanly. The verification script checks that `dist/service-worker.js` exists and is non-empty.
+
+### 5. "Stale Build"
+- **Cause:** Chrome is keeping a previously loaded broken build in memory.
+- **Fix:** Go to `chrome://extensions`, click the **Reload** (circular arrow) icon on the Euclid Smart Clipper card, or remove the extension and re-click **Load unpacked** selecting `dist/`.
 
 ---
 

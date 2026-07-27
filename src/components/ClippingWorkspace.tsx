@@ -255,7 +255,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       id: newNoteId,
       user_id: 'local-user',
       title: noteTitle,
-      content: currentContent.html,
+      content: currentContent.cleanHtml || currentContent.markdown || '',
       plainTextContent: noteComment + '\n' + selectedText,
       markdownContent: currentContent.markdown,
       notebook_id: selectedNotebookId,
@@ -272,7 +272,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       readingTime: 1,
       extensionCreated: true,
       extensionVersion: '1.0.0',
-      syncStatus: localOnly ? 'pending' : 'synced',
+      syncStatus: localOnly ? 'queued' : 'synced',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

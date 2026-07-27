@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Euclid Smart Clipper",
+  "short_name": "Euclid Clipper",
+  "version": "1.0.0",
+  "description": "Official web-clipping, webpage-annotation, screenshot, recording, YouTube note-taking, and research companion for Euclid Smart Notes.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Euclid Smart Clipper"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "contextMenus",
+    "sidePanel",
+    "scripting",
+    "downloads",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "src/background/serviceWorker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/contentScript.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
+      "description": "Open Euclid Smart Clipper Popup"
+    },
+    "clip_article": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Clip Simplified Article"
+    },
+    "capture_screenshot": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Capture Screenshot"
+    },
+    "add_youtube_timestamp": {
+      "suggested_key": {
+        "default": "Alt+N"
+      },
+      "description": "Add YouTube Timestamped Note"
+    }
+  }
+}

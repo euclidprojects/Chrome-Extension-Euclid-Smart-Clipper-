@@ -1,0 +1,142 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information for Euclid ID",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "plan": { "type": "string", "enum": ["free", "pro", "education", "team"] },
+        "storageUsed": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Notebook": {
+      "title": "Notebook Collection",
+      "description": "High-level notebook container for notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 512 },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Folder": {
+      "title": "Folder Hierarchy",
+      "description": "Sub-containers within notebooks",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "notebookId": { "type": "string", "maxLength": 128 },
+        "parentId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Tag": {
+      "title": "Tag Label",
+      "description": "Categorization tag across notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 32 },
+        "group": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Note": {
+      "title": "Euclid Note Document",
+      "description": "Main note / web clip document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 512 },
+        "content": { "type": "string", "maxLength": 1000000 },
+        "plainTextContent": { "type": "string", "maxLength": 500000 },
+        "markdownContent": { "type": "string", "maxLength": 1000000 },
+        "folder_id": { "type": "string", "maxLength": 128 },
+        "notebook_id": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 32 },
+        "is_pinned": { "type": "boolean" },
+        "is_favorite": { "type": "boolean" },
+        "is_archived": { "type": "boolean" },
+        "is_deleted": { "type": "boolean" },
+        "noteType": { "type": "string", "maxLength": 32 },
+        "sourceUrl": { "type": "string", "maxLength": 2048 },
+        "sourceDomain": { "type": "string", "maxLength": 256 },
+        "sourceAuthor": { "type": "string", "maxLength": 128 },
+        "sourceFavicon": { "type": "string", "maxLength": 2048 },
+        "clipFormat": { "type": "string", "maxLength": 32 },
+        "wordCount": { "type": "number" },
+        "readingTime": { "type": "number" },
+        "tags": { "type": "array" },
+        "extensionCreated": { "type": "boolean" },
+        "extensionVersion": { "type": "string", "maxLength": 32 },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "user_id", "title"]
+    },
+    "Attachment": {
+      "title": "Note Attachment",
+      "description": "Media asset associated with a note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "noteId": { "type": "string", "maxLength": 128 },
+        "filename": { "type": "string", "maxLength": 256 },
+        "mimeType": { "type": "string", "maxLength": 128 },
+        "fileSize": { "type": "number" },
+        "storagePath": { "type": "string", "maxLength": 1024 },
+        "downloadURL": { "type": "string", "maxLength": 2048 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "noteId", "storagePath"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/notebooks/{notebookId}": {
+      "schema": { "$ref": "#/entities/Notebook" },
+      "description": "Notebook containers"
+    },
+    "/Folders/{folderId}": {
+      "schema": { "$ref": "#/entities/Folder" },
+      "description": "Folder hierarchy"
+    },
+    "/Tags/{tagId}": {
+      "schema": { "$ref": "#/entities/Tag" },
+      "description": "User tags"
+    },
+    "/Notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "Euclid notes and web clips"
+    },
+    "/Attachments/{attachmentId}": {
+      "schema": { "$ref": "#/entities/Attachment" },
+      "description": "File attachments"
+    }
+  }
+}

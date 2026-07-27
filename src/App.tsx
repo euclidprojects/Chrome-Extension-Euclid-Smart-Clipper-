@@ -213,6 +213,7 @@ export default function App() {
             onCreateFolder={handleCreateFolder}
             onCreateTag={handleCreateTag}
             onOpenSmartNotesNote={handleOpenSmartNotesNote}
+            isSidePanel={activeView === 'sidepanel'}
           />
         ) : activeView === 'video' ? (
           <VideoNotesWorkspace

@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveView('popup')}
           className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all ${
             activeView === 'popup'
-              ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]'
+              ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
           title="Extension Popup Mode"
@@ -77,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveView('sidepanel')}
           className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all ${
             activeView === 'sidepanel'
-              ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]'
+              ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
           title="Side Panel Workspace"
@@ -90,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveView('video')}
           className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all ${
             activeView === 'video'
-              ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]'
+              ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
           title="YouTube & Video Notes Workspace"
@@ -103,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveView('annotation')}
           className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all ${
             activeView === 'annotation'
-              ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]'
+              ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
           title="Screenshot & Annotation Suite"
@@ -116,7 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => setActiveView('dashboard')}
           className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all ${
             activeView === 'dashboard'
-              ? 'bg-indigo-600 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]'
+              ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
           title="Full Extension Dashboard"

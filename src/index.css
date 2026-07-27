@@ -1,24 +1,65 @@
 @import "tailwindcss";
 
-@layer base {
-  body {
-    background-color: #0F1115;
-    color: #e2e8f0;
-  }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
-  /* Custom subtle dark scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #0F1115;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #1e293b;
-    border-radius: 9999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
-  }
+html,
+body,
+#root {
+  width: 460px;
+  min-width: 420px;
+  max-width: 520px;
+  height: 600px;
+  min-height: 560px;
+  margin: 0 auto;
+  padding: 0;
+  overflow: hidden;
+  background-color: #0F1115;
+  color: #e2e8f0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.4;
+}
+
+#root.is-full-workspace {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 100% !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: auto !important;
+}
+
+.clipper-popup {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #0F1115;
+}
+
+.clipper-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+}
+
+/* Custom subtle dark scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F1115;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
 }

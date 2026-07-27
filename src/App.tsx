@@ -53,6 +53,18 @@ export default function App() {
   // Onboarding
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
 
+  // Manage #root class based on activeView
+  useEffect(() => {
+    const rootEl = document.getElementById('root');
+    if (rootEl) {
+      if (activeView === 'popup') {
+        rootEl.classList.remove('is-full-workspace');
+      } else {
+        rootEl.classList.add('is-full-workspace');
+      }
+    }
+  }, [activeView]);
+
   // Initialize Local IndexedDB & Seed Defaults
   useEffect(() => {
     async function initApp() {
@@ -190,6 +202,30 @@ export default function App() {
     a.click();
   };
 
+  // Dedicated Main Popup View Mode
+  if (activeView === 'popup') {
+    return (
+      <div className="clipper-popup">
+        <ClippingWorkspace
+          notebooks={notebooks}
+          folders={folders}
+          tags={tags}
+          existingNotes={notes}
+          onSaveNote={handleSaveNote}
+          onCreateNotebook={handleCreateNotebook}
+          onCreateFolder={handleCreateFolder}
+          onCreateTag={handleCreateTag}
+          onOpenSmartNotesNote={handleOpenSmartNotesNote}
+          isSidePanel={false}
+          onOpenSidePanel={() => setActiveView('sidepanel')}
+          onOpenSettings={() => setActiveView('settings')}
+        />
+        {showOnboarding && <OnboardingModal onClose={() => setShowOnboarding(false)} />}
+      </div>
+    );
+  }
+
+  // Expanded Workspace View Modes (Side Panel, Video, Annotation, Dashboard, Settings)
   return (
     <div className="min-h-screen bg-[#0F1115] text-slate-200 flex flex-col font-sans">
       <Header
@@ -202,7 +238,7 @@ export default function App() {
       />
 
       <main className="flex-1 pb-10">
-        {activeView === 'popup' || activeView === 'sidepanel' ? (
+        {activeView === 'sidepanel' ? (
           <ClippingWorkspace
             notebooks={notebooks}
             folders={folders}
@@ -213,7 +249,9 @@ export default function App() {
             onCreateFolder={handleCreateFolder}
             onCreateTag={handleCreateTag}
             onOpenSmartNotesNote={handleOpenSmartNotesNote}
-            isSidePanel={activeView === 'sidepanel'}
+            isSidePanel={true}
+            onOpenSidePanel={() => setActiveView('sidepanel')}
+            onOpenSettings={() => setActiveView('settings')}
           />
         ) : activeView === 'video' ? (
           <VideoNotesWorkspace

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-console.log('🔍 Starting Extension Build Verification...');
+console.log('🔍 Starting Comprehensive Extension Build Verification...');
 
 const distDir = path.resolve(process.cwd(), 'dist');
 
@@ -26,73 +26,63 @@ try {
   process.exit(1);
 }
 
-const requiredFiles = [];
+const resourcesToCheck = [];
 
-// Icons check
-if (manifest.icons) {
-  Object.entries(manifest.icons).forEach(([size, iconPath]) => {
-    requiredFiles.push({ name: `Icon (${size}px)`, relPath: iconPath, isPng: true });
-  });
-}
+// Recursive inspector to find relative file paths referenced in manifest
+function inspectManifestObject(obj, currentKey = '') {
+  if (!obj) return;
 
-// Action default popup check
-if (manifest.action?.default_popup) {
-  requiredFiles.push({ name: 'Default Popup', relPath: manifest.action.default_popup });
-}
-
-// Side panel check
-if (manifest.side_panel?.default_path) {
-  requiredFiles.push({ name: 'Side Panel Page', relPath: manifest.side_panel.default_path });
-}
-
-// Service worker check
-if (manifest.background?.service_worker) {
-  requiredFiles.push({ name: 'Background Service Worker', relPath: manifest.background.service_worker });
-}
-
-// Content scripts check
-if (Array.isArray(manifest.content_scripts)) {
-  manifest.content_scripts.forEach((cs, i) => {
-    if (Array.isArray(cs.js)) {
-      cs.js.forEach((jsPath) => {
-        requiredFiles.push({ name: `Content Script JS #${i + 1}`, relPath: jsPath });
-      });
+  if (typeof obj === 'string') {
+    // If string points to a relative file (ends with .png, .jpg, .html, .js, .css, etc.)
+    if (obj.match(/\.(png|jpg|jpeg|svg|html|js|css|json)$/i) && !obj.startsWith('http://') && !obj.startsWith('https://')) {
+      resourcesToCheck.push({ key: currentKey, relPath: obj });
     }
-    if (Array.isArray(cs.css)) {
-      cs.css.forEach((cssPath) => {
-        requiredFiles.push({ name: `Content Script CSS #${i + 1}`, relPath: cssPath });
-      });
-    }
-  });
+  } else if (Array.isArray(obj)) {
+    obj.forEach((item, index) => inspectManifestObject(item, `${currentKey}[${index}]`));
+  } else if (typeof obj === 'object') {
+    Object.entries(obj).forEach(([k, v]) => {
+      // Skip chrome permissions or match patterns
+      if (k === 'matches' || k === 'permissions' || k === 'host_permissions') return;
+      inspectManifestObject(v, currentKey ? `${currentKey}.${k}` : k);
+    });
+  }
 }
+
+inspectManifestObject(manifest);
 
 let errorCount = 0;
+const checkedPaths = new Set();
 
-for (const file of requiredFiles) {
-  const fullPath = path.join(distDir, file.relPath);
+console.log(`\nFound ${resourcesToCheck.length} manifest-referenced resources to verify:`);
+
+for (const resource of resourcesToCheck) {
+  const relPath = resource.relPath;
+  if (checkedPaths.has(relPath)) continue;
+  checkedPaths.add(relPath);
+
+  const fullPath = path.join(distDir, relPath);
+
   if (!fs.existsSync(fullPath)) {
-    console.error(`❌ MISSING: ${file.name} -> dist/${file.relPath}`);
+    console.error(`❌ ERROR: manifest.json references ${relPath}, but dist/${relPath} does not exist.`);
     errorCount++;
   } else {
     const stats = fs.statSync(fullPath);
     if (stats.size === 0) {
-      console.error(`❌ EMPTY FILE: ${file.name} -> dist/${file.relPath}`);
+      console.error(`❌ ERROR: manifest.json references ${relPath}, but dist/${relPath} is empty (0 bytes).`);
       errorCount++;
-    } else {
-      if (file.isPng || file.relPath.endsWith('.png')) {
-        const buf = fs.readFileSync(fullPath);
-        // Verify PNG magic header: 0x89 0x50 0x4E 0x47 (137 80 78 71)
-        if (buf.length < 8 || buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) {
-          console.error(`❌ INVALID PNG: ${file.name} -> dist/${file.relPath} (Corrupted or invalid PNG header)`);
-          errorCount++;
-          continue;
-        }
+    } else if (relPath.endsWith('.png')) {
+      const buf = fs.readFileSync(fullPath);
+      // Verify PNG magic header: 0x89 0x50 0x4E 0x47
+      if (buf.length < 8 || buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) {
+        console.error(`❌ ERROR: manifest.json references ${relPath}, but dist/${relPath} is not a valid PNG image.`);
+        errorCount++;
+      } else {
         const width = buf.readUInt32BE(16);
         const height = buf.readUInt32BE(20);
-        console.log(`  ✓ Valid PNG Icon: ${file.name} (dist/${file.relPath}, ${width}x${height}px, ${stats.size} bytes)`);
-      } else {
-        console.log(`  ✓ Found: ${file.name} (dist/${file.relPath}, ${stats.size} bytes)`);
+        console.log(`  ✓ Valid PNG Icon [${resource.key}]: dist/${relPath} (${width}x${height}px, ${stats.size} bytes)`);
       }
+    } else {
+      console.log(`  ✓ Verified File [${resource.key}]: dist/${relPath} (${stats.size} bytes)`);
     }
   }
 }
@@ -102,4 +92,4 @@ if (errorCount > 0) {
   process.exit(1);
 }
 
-console.log('\n🎉 Extension Build Verification PASSED! Official unpacked extension ready in dist/');
+console.log('\n🎉 Extension Build Verification PASSED! Complete unpacked Chrome extension ready in dist/\n');

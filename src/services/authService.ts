@@ -3,7 +3,6 @@ import {
   db,
   firebaseConfig,
   googleProvider,
-  signInWithPopup,
   fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -34,7 +33,7 @@ export interface AuthState {
 }
 
 export const authErrorMessages: Record<string, string> = {
-  "auth/argument-error": "Authentication received invalid configuration data. Please reload the extension and try again.",
+  "auth/argument-error": "Authentication could not be initialized. Please reload the extension and try again.",
   "auth/internal-error": "Authentication could not be started. Please try again.",
   "auth/operation-not-allowed": "This sign-in method is not currently enabled.",
   "auth/invalid-credential": "The email or password is incorrect.",
@@ -131,59 +130,81 @@ class AuthService {
     this.state.error = null;
     this.state.errorCode = null;
 
+    if (!auth) {
+      console.error("[Auth Debug] Firebase Auth instance is missing.");
+      this.updateState({
+        status: 'error',
+        error: 'Authentication could not be initialized. Please reload the extension and try again.',
+        errorCode: 'auth/missing-instance',
+      });
+      return;
+    }
+
+    const handleAuthState = async (fbUser: FirebaseUser | null) => {
+      if (fbUser) {
+        try {
+          const euclidUser = await buildEuclidUserFromFirebase(fbUser);
+          this.updateState({
+            status: 'signed-in',
+            user: euclidUser,
+            error: null,
+            errorCode: null,
+          });
+        } catch (e: any) {
+          console.error("[Auth Debug] Firebase failure", {
+            code: e?.code,
+            message: e?.message,
+            name: e?.name,
+            context: "popup"
+          });
+          this.updateState({
+            status: 'signed-in',
+            user: {
+              uid: fbUser.uid,
+              email: fbUser.email,
+              displayName: fbUser.displayName || 'Euclid User',
+              photoURL: fbUser.photoURL,
+              plan: 'pro',
+              storageUsed: 0,
+              storageLimit: 10 * 1024 * 1024 * 1024,
+              connectedToSmartNotes: true,
+              lastSyncedAt: new Date().toISOString(),
+            },
+            error: null,
+          });
+        }
+      } else {
+        // Signed-out is NORMAL and MUST NOT create an error
+        this.updateState({
+          status: 'signed-out',
+          user: null,
+          error: null,
+          errorCode: null,
+        });
+      }
+    };
+
+    if (typeof handleAuthState !== 'function') {
+      console.error(`[Auth Debug] Invalid Firebase auth callback: ${typeof handleAuthState}`);
+      this.updateState({
+        status: 'error',
+        error: 'Authentication could not be initialized. Please reload the extension and try again.',
+        errorCode: 'auth/invalid-callback',
+      });
+      return;
+    }
+
     console.info("[Auth Debug] Calling function", {
       functionName: "onAuthStateChanged",
       authExists: Boolean(auth),
       appExists: true,
       projectId: firebaseConfig?.projectId,
-      hasRequiredArguments: Boolean(auth)
+      hasRequiredArguments: Boolean(auth && typeof handleAuthState === 'function')
     });
 
     this.unsubscribeFirebase = onAuthStateChanged(
       auth,
-      async (fbUser) => {
-        if (fbUser) {
-          try {
-            const euclidUser = await buildEuclidUserFromFirebase(fbUser);
-            this.updateState({
-              status: 'signed-in',
-              user: euclidUser,
-              error: null,
-              errorCode: null,
-            });
-          } catch (e: any) {
-            console.error("[Auth Debug] Firebase failure", {
-              code: e?.code,
-              message: e?.message,
-              name: e?.name,
-              context: "popup"
-            });
-            this.updateState({
-              status: 'signed-in',
-              user: {
-                uid: fbUser.uid,
-                email: fbUser.email,
-                displayName: fbUser.displayName || 'Euclid User',
-                photoURL: fbUser.photoURL,
-                plan: 'pro',
-                storageUsed: 0,
-                storageLimit: 10 * 1024 * 1024 * 1024,
-                connectedToSmartNotes: true,
-                lastSyncedAt: new Date().toISOString(),
-              },
-              error: null,
-            });
-          }
-        } else {
-          // Signed-out is NORMAL and MUST NOT create an error
-          this.updateState({
-            status: 'signed-out',
-            user: null,
-            error: null,
-            errorCode: null,
-          });
-        }
-      },
+      handleAuthState,
       (error: any) => {
         console.error("[Auth Debug] Firebase failure", {
           code: error?.code,

@@ -3,7 +3,6 @@ import {
   db,
   storage,
   googleProvider,
-  signInWithPopup,
   fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,

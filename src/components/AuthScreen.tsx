@@ -39,9 +39,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
   // Subscribe to central authService state for updates
   useEffect(() => {
     const unsubscribe = authService.subscribe((state) => {
-      if (state.error) {
-        setErrorMsg(state.error);
-      }
+      setErrorMsg(state.error);
       if (state.user && state.status === 'signed-in') {
         onAuthenticated(state.user);
       }
@@ -53,6 +51,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
     setErrorMsg(null);
     setSuccessMsg(null);
     authService.clearError();
+    setMode('select');
   };
 
   // Helper: validate password requirements

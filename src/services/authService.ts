@@ -52,6 +52,9 @@ export const authErrorMessages: Record<string, string> = {
 export function getFriendlyAuthErrorMessage(error: any): string {
   if (!error) return "";
   const code = error.code || (typeof error === "string" ? error : "");
+  if (error.message && error.message.includes("auth/argument-error")) {
+    return "Google Sign-In returned invalid authentication data. Please try again.";
+  }
   if (code && authErrorMessages[code]) {
     return authErrorMessages[code];
   }

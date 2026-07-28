@@ -2,6 +2,19 @@
 // Background Service Worker for Euclid Smart Clipper
 
 import { isSupportedPage } from '../utils/pageUtils';
+import { auth, firebaseConfig } from '../lib/firebase';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-extension';
+
+const EXPECTED_EXTENSION_ID = "fhphlopkmeipmabplekkeepjakikijke";
+
+if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
+  if (chrome.runtime.id !== EXPECTED_EXTENSION_ID) {
+    console.warn("Extension ID mismatch:", {
+      current: chrome.runtime.id,
+      expected: EXPECTED_EXTENSION_ID
+    });
+  }
+}
 
 // Context Menu & Lifecycle Initialization
 if (typeof chrome !== 'undefined' && chrome.runtime) {
@@ -153,10 +166,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return true;
     }
 
-    if (request.type === 'GOOGLE_SIGN_IN_REQUEST') {
+    if (request.type === 'EUCLID_GOOGLE_SIGN_IN' || request.type === 'GOOGLE_SIGN_IN_REQUEST') {
       handleGoogleSignInOffscreen()
         .then((res) => sendResponse(res))
-        .catch((err) => sendResponse({ success: false, error: err?.message || 'Google Auth Error' }));
+        .catch((err) => sendResponse({
+          success: false,
+          error: err?.message || 'Google Sign-In returned invalid authentication data. Please try again.'
+        }));
       return true;
     }
 
@@ -543,12 +559,28 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     return false;
   }
 
+  interface OffscreenGoogleAuthResponse {
+    success: boolean;
+    idToken?: string;
+    accessToken?: string;
+    user?: {
+      uid: string;
+      email: string | null;
+      displayName: string | null;
+      photoURL: string | null;
+    };
+    error?: {
+      code?: string;
+      message?: string;
+    } | string;
+  }
+
   async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
     console.info("[Auth Debug] Calling function", {
       functionName: "handleGoogleSignInOffscreen",
-      authExists: true,
+      authExists: Boolean(auth),
       appExists: true,
-      projectId: "euclid-projects",
+      projectId: firebaseConfig?.projectId || "euclid-projects",
       hasRequiredArguments: true
     });
 
@@ -562,33 +594,94 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         await chrome.offscreen.createDocument({
           url: 'offscreen.html',
           reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
-          justification: 'Complete Firebase Google authentication through a hosted iframe.',
+          justification: 'Complete Firebase Google authentication using a hosted authentication page.',
         });
       }
 
-      return new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GOOGLE_SIGN_IN_OFFSCREEN' }, (res) => {
+      const response = await new Promise<OffscreenGoogleAuthResponse | null>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'EUCLID_GOOGLE_SIGN_IN' }, (res) => {
           if (chrome.runtime.lastError) {
             console.error("[Auth Debug] Firebase failure", {
-              code: chrome.runtime.lastError.message,
+              code: 'CHROME_RUNTIME_ERROR',
               message: chrome.runtime.lastError.message,
               name: 'ChromeRuntimeError',
               context: 'background'
             });
-            resolve({ success: false, error: chrome.runtime.lastError.message });
+            resolve({
+              success: false,
+              error: {
+                code: 'CHROME_RUNTIME_ERROR',
+                message: chrome.runtime.lastError.message || 'Offscreen document messaging failed.'
+              }
+            });
           } else {
-            resolve(res || { success: false, error: 'No response from offscreen document' });
+            resolve(res || null);
           }
         });
       });
-    } catch (err: any) {
-      console.error("[Auth Debug] Firebase failure", {
-        code: err?.code || 'OFFSCREEN_AUTH_FAILED',
-        message: err?.message,
-        name: err?.name,
-        context: 'background'
+
+      if (!response) {
+        throw new Error("The offscreen authentication page returned no response.");
+      }
+
+      if (!response.success) {
+        const rawErr = response.error;
+        const errMsg = typeof rawErr === 'object' ? rawErr?.message : typeof rawErr === 'string' ? rawErr : 'Google authentication failed.';
+        throw new Error(errMsg || "Google authentication failed.");
+      }
+
+      const idToken = typeof response.idToken === "string" && response.idToken.trim() ? response.idToken.trim() : undefined;
+      const accessToken = typeof response.accessToken === "string" && response.accessToken.trim() ? response.accessToken.trim() : undefined;
+
+      console.info("[Google Auth] Offscreen response received:", {
+        responseExists: Boolean(response),
+        success: response?.success,
+        hasIdToken: typeof response?.idToken === "string" && response.idToken.length > 0,
+        hasAccessToken: typeof response?.accessToken === "string" && response.accessToken.length > 0,
+        hasUser: Boolean(response?.user)
       });
-      return { success: false, error: err?.message || 'Offscreen Auth Failed' };
+
+      if (idToken || accessToken) {
+        console.info("[Google Auth] Creating credential:", {
+          authExists: Boolean(auth),
+          hasIdToken: Boolean(idToken),
+          hasAccessToken: Boolean(accessToken)
+        });
+
+        if (!auth) {
+          throw new Error("Firebase Auth instance is missing.");
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken, accessToken);
+        const userCredential = await signInWithCredential(auth, credential);
+        return {
+          success: true,
+          user: {
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            displayName: userCredential.user.displayName,
+            photoURL: userCredential.user.photoURL,
+          }
+        };
+      } else if (response.user && response.user.uid) {
+        return {
+          success: true,
+          user: response.user
+        };
+      } else {
+        throw new Error("Google authentication returned no valid ID token or access token.");
+      }
+    } catch (err: any) {
+      console.error("[Google Auth] Failure:", {
+        code: err?.code || 'GOOGLE_AUTH_ERROR',
+        message: err?.message,
+        stack: err?.stack,
+        function: "handleGoogleSignInOffscreen"
+      });
+      return {
+        success: false,
+        error: err?.message || "Google Sign-In returned invalid authentication data. Please try again."
+      };
     }
   }
 }

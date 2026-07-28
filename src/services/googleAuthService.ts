@@ -1,7 +1,16 @@
 import { firebaseConfig } from '../firebase/config';
 
-if (typeof window !== 'undefined') {
-  console.info("Euclid Smart Clipper extension ID:", typeof chrome !== "undefined" && chrome?.runtime?.id ? chrome.runtime.id : "web-preview");
+const EXPECTED_EXTENSION_ID = "fhphlopkmeipmabplekkeepjakikijke";
+
+if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
+  if (chrome.runtime.id !== EXPECTED_EXTENSION_ID) {
+    console.warn("Extension ID mismatch:", {
+      current: chrome.runtime.id,
+      expected: EXPECTED_EXTENSION_ID
+    });
+  } else {
+    console.info("Euclid Smart Clipper extension ID verified:", chrome.runtime.id);
+  }
 }
 
 export async function initiateGoogleSignIn(): Promise<any> {
@@ -17,7 +26,7 @@ export async function initiateGoogleSignIn(): Promise<any> {
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
     try {
       const response = await new Promise<any>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GOOGLE_SIGN_IN_REQUEST' }, (res) => {
+        chrome.runtime.sendMessage({ type: 'EUCLID_GOOGLE_SIGN_IN' }, (res) => {
           if (chrome.runtime.lastError) {
             console.error("[Auth Debug] Firebase failure", {
               code: 'CHROME_RUNTIME_ERROR',
@@ -36,14 +45,21 @@ export async function initiateGoogleSignIn(): Promise<any> {
         return response.user;
       }
 
-      const errMsg = response?.error || 'Google sign-in could not be completed.';
+      const rawErr = response?.error;
+      const errMsg = typeof rawErr === 'object' && rawErr?.message
+        ? rawErr.message
+        : typeof rawErr === 'string'
+        ? rawErr
+        : 'Google Sign-In returned invalid authentication data. Please try again.';
+
       console.error("[Auth Debug] Firebase failure", {
-        code: response?.code || 'GOOGLE_SIGNIN_FAILED',
+        code: (typeof rawErr === 'object' && rawErr?.code) || 'GOOGLE_SIGNIN_FAILED',
         message: errMsg,
         name: 'GoogleSignInError',
         context: 'popup'
       });
-      throw new Error(typeof errMsg === 'string' ? errMsg : 'Google sign-in failed.');
+
+      throw new Error(errMsg);
     } catch (e: any) {
       console.error("[Auth Debug] Firebase failure", {
         code: e?.code || 'GOOGLE_AUTH_ERROR',

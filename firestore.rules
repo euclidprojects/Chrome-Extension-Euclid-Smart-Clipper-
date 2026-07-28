@@ -19,11 +19,13 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Users Collection
+    // Users Collection and Subcollections
     match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId);
-      allow create, update: if isOwner(userId) && request.resource.data.uid == userId;
-      allow delete: if isOwner(userId);
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /clips/{clipId} {
+        allow read, create, update, delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // Notebooks Collection

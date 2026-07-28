@@ -1,6 +1,6 @@
 {
   "name": "Euclid Smart Clipper",
   "description": "Official web-clipping, webpage-annotation, screenshot, recording, YouTube note-taking, and research companion for Euclid Smart Notes.",
-  "requestFramePermissions": ["camera", "microphone"],
+  "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

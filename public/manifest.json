@@ -34,7 +34,8 @@
     "sidePanel",
     "scripting",
     "downloads",
-    "tabs"
+    "tabs",
+    "identity"
   ],
 
   "host_permissions": [

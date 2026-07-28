@@ -40,7 +40,9 @@ import {
   EuclidVideoNote,
   ClipType,
   ScreenshotMode,
+  EuclidUser,
 } from '../types';
+import { AccountMenu } from './AccountMenu';
 import { clippingService } from '../services/clippingService';
 import { isSupportedPage } from '../utils/pageUtils';
 import {
@@ -55,6 +57,8 @@ import {
 } from '../utils/youtubeUtils';
 
 interface ClippingWorkspaceProps {
+  user?: EuclidUser | null;
+  onSignOut?: () => void;
   notebooks: EuclidNotebook[];
   folders: EuclidFolder[];
   tags: EuclidTag[];
@@ -72,6 +76,8 @@ interface ClippingWorkspaceProps {
 export type ClipFormatType = ClipType;
 
 export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
+  user,
+  onSignOut,
   notebooks,
   folders,
   tags,
@@ -912,6 +918,16 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {user && onSignOut && (
+            <AccountMenu
+              user={user}
+              compact
+              onSignOut={onSignOut}
+              onOpenSettings={onOpenSettings}
+              onOpenSmartNotes={() => window.open('https://notes.app.euclidprojects.org', '_blank')}
+            />
+          )}
+
           {!isSidePanel && onOpenSidePanel && (
             <button
               type="button"

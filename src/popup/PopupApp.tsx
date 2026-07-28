@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ClippingWorkspace } from '../components/ClippingWorkspace';
+import { AuthScreen } from '../components/AuthScreen';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { OnboardingModal } from '../components/OnboardingModal';
 import {
@@ -17,7 +18,7 @@ import {
   localFolderRepo,
   localTagRepo,
 } from '../storage/indexedDB';
-import { firebaseSyncService } from '../services/firebaseService';
+import { firebaseAuthService, firebaseSyncService } from '../services/firebaseService';
 
 const DEFAULT_NOTEBOOKS: EuclidNotebook[] = [
   {
@@ -45,23 +46,30 @@ const DEFAULT_TAGS: EuclidTag[] = [
 ];
 
 export default function PopupApp() {
-  const [user] = useState<EuclidUser | null>({
-    uid: 'euclid-user-demo',
-    email: 'researcher@euclidprojects.org',
-    displayName: 'Euclid Researcher',
-    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-    plan: 'pro',
-    storageUsed: 180 * 1024 * 1024,
-    storageLimit: 10 * 1024 * 1024 * 1024,
-    connectedToSmartNotes: true,
-    lastSyncedAt: new Date().toISOString(),
-  });
+  const [user, setUser] = useState<EuclidUser | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
 
   const [notes, setNotes] = useState<EuclidNote[]>([]);
   const [notebooks, setNotebooks] = useState<EuclidNotebook[]>(DEFAULT_NOTEBOOKS);
   const [folders, setFolders] = useState<EuclidFolder[]>([]);
   const [tags, setTags] = useState<EuclidTag[]>(DEFAULT_TAGS);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+
+  // Auth State Subscription
+  useEffect(() => {
+    const unsubscribe = firebaseAuthService.onAuthChange((authUser) => {
+      setUser(authUser);
+      setIsLoadingAuth(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sign out handler
+  const handleSignOut = async () => {
+    await firebaseAuthService.signOut();
+    setUser(null);
+    setNotes([]); // Clear private user notes
+  };
 
   // Inspected height debugging (logged once in non-production)
   useEffect(() => {
@@ -111,6 +119,9 @@ export default function PopupApp() {
 
   const handleSaveNote = async (note: EuclidNote): Promise<string | boolean> => {
     try {
+      if (!user) {
+        throw new Error('Authentication required to save clips.');
+      }
       await localNoteRepo.save(note);
       if (user?.connectedToSmartNotes) {
         await firebaseSyncService.saveNoteToSmartNotes(note, user.uid);
@@ -186,10 +197,28 @@ export default function PopupApp() {
     window.open(chrome.runtime.getURL('index.html'), '_blank');
   };
 
+  if (isLoadingAuth) {
+    return (
+      <div className="euclid-popup-root w-full h-full min-h-[500px] flex flex-col bg-[#071018] text-slate-100 overflow-hidden">
+        <AuthScreen onAuthenticated={() => {}} isLoadingSession={true} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="euclid-popup-root w-full h-full min-h-[520px] flex flex-col bg-[#071018] text-slate-100 overflow-hidden">
+        <AuthScreen onAuthenticated={(authenticatedUser) => setUser(authenticatedUser)} />
+      </div>
+    );
+  }
+
   return (
     <div className="euclid-popup-root w-full h-full flex flex-col bg-[#071018] text-slate-100 overflow-hidden">
       <ErrorBoundary fallbackMessage="Euclid Smart Clipper could not load this section. Reload the extension and try again.">
         <ClippingWorkspace
+          user={user}
+          onSignOut={handleSignOut}
           notebooks={notebooks}
           folders={folders}
           tags={tags}
@@ -208,3 +237,4 @@ export default function PopupApp() {
     </div>
   );
 }
+

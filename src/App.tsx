@@ -6,6 +6,7 @@ import { ScreenshotAnnotationSuite } from './components/ScreenshotAnnotationSuit
 import { DashboardView } from './components/DashboardView';
 import { SettingsView } from './components/SettingsView';
 import { OnboardingModal } from './components/OnboardingModal';
+import { AuthScreen } from './components/AuthScreen';
 import {
   EuclidNote,
   EuclidNotebook,
@@ -31,17 +32,8 @@ export default function App() {
   >('popup');
 
   // User & Sync State
-  const [user, setUser] = useState<EuclidUser | null>({
-    uid: 'euclid-user-demo',
-    email: 'researcher@euclidprojects.org',
-    displayName: 'Euclid Researcher',
-    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
-    plan: 'pro',
-    storageUsed: 180 * 1024 * 1024,
-    storageLimit: 10 * 1024 * 1024 * 1024,
-    connectedToSmartNotes: true,
-    lastSyncedAt: new Date().toISOString(),
-  });
+  const [user, setUser] = useState<EuclidUser | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
 
   // Core Data
@@ -52,6 +44,21 @@ export default function App() {
 
   // Onboarding
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+
+  // Auth Subscription
+  useEffect(() => {
+    const unsubscribe = firebaseAuthService.onAuthChange((authUser) => {
+      setUser(authUser);
+      setIsLoadingAuth(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await firebaseAuthService.signOut();
+    setUser(null);
+    setNotes([]);
+  };
 
   // Manage #root, html, body class based on activeView
   useEffect(() => {
@@ -207,10 +214,30 @@ export default function App() {
   };
 
   // Dedicated Main Popup View Mode
+  if (isLoadingAuth) {
+    return (
+      <div className="min-h-screen bg-[#071018] text-slate-100 flex flex-col items-center justify-center">
+        <AuthScreen onAuthenticated={() => {}} isLoadingSession={true} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#071018] text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-[#0d151c] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+          <AuthScreen onAuthenticated={(authenticatedUser) => setUser(authenticatedUser)} />
+        </div>
+      </div>
+    );
+  }
+
   if (activeView === 'popup') {
     return (
       <div className="clipper-popup">
         <ClippingWorkspace
+          user={user}
+          onSignOut={handleSignOut}
           notebooks={notebooks}
           folders={folders}
           tags={tags}
@@ -239,11 +266,14 @@ export default function App() {
         setActiveView={setActiveView}
         onConnectAccount={handleConnectGoogle}
         onOpenSmartNotes={() => window.open('https://notes.app.euclidprojects.org/', '_blank')}
+        onSignOut={handleSignOut}
       />
 
       <main className="flex-1 pb-10">
         {activeView === 'sidepanel' ? (
           <ClippingWorkspace
+            user={user}
+            onSignOut={handleSignOut}
             notebooks={notebooks}
             folders={folders}
             tags={tags}

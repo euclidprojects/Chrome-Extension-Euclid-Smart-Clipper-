@@ -16,6 +16,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { EuclidUser, SyncStatus } from '../types';
+import { AccountMenu } from './AccountMenu';
 
 interface HeaderProps {
   user: EuclidUser | null;
@@ -24,6 +25,7 @@ interface HeaderProps {
   setActiveView: (view: any) => void;
   onConnectAccount: () => void;
   onOpenSmartNotes: () => void;
+  onSignOut: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveView,
   onConnectAccount,
   onOpenSmartNotes,
+  onSignOut,
 }) => {
   return (
     <header className="bg-[#0F1115]/90 backdrop-blur-md text-white border-b border-slate-800/80 px-6 py-3 flex items-center justify-between shadow-lg sticky top-0 z-50">
@@ -128,24 +131,21 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls: Account, Sync, Settings & Smart Notes External Link */}
       <div className="flex items-center gap-3">
-        {/* Connection Badge */}
-        {user?.connectedToSmartNotes ? (
-          <button
-            onClick={onOpenSmartNotes}
-            className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold transition-all group"
-            title="Open Euclid Smart Notes Web App"
-          >
-            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_#4ade80]" />
-            <span className="text-white group-hover:text-indigo-300">Smart Notes Sync Active</span>
-            <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 ml-0.5" />
-          </button>
+        {user ? (
+          <AccountMenu
+            user={user}
+            syncStatus={syncStatus}
+            onSignOut={onSignOut}
+            onOpenSettings={() => setActiveView('settings')}
+            onOpenSmartNotes={onOpenSmartNotes}
+          />
         ) : (
           <button
             onClick={onConnectAccount}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all"
           >
             <UserCheck className="w-3.5 h-3.5" />
-            <span>Connect Euclid ID</span>
+            <span>Sign In</span>
           </button>
         )}
 

@@ -5,6 +5,58 @@ export type ClipType =
   | 'simplified_article'
   | 'full_page';
 
+export type CaptureJobType =
+  | 'visible_page'
+  | 'selected_area'
+  | 'full_page'
+  | 'video_frame'
+  | 'element';
+
+export type CaptureJobStatus =
+  | 'selecting'
+  | 'capturing'
+  | 'processing'
+  | 'editing'
+  | 'saving'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
+
+export interface CaptureJob {
+  id: string;
+  type: CaptureJobType;
+  tabId?: number;
+  sourceUrl: string;
+  sourceTitle: string;
+  createdAt: number;
+  status: CaptureJobStatus;
+  imageBlobKey?: string;
+  dataUrl?: string;
+  annotatedDataUrl?: string;
+  originalWidth?: number;
+  originalHeight?: number;
+  selectionRect?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    viewportX?: number;
+    viewportY?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    devicePixelRatio?: number;
+  };
+  videoTimestamp?: number;
+  formattedVideoTime?: string;
+  userRemark?: string;
+  notebookId?: string;
+  folderId?: string;
+  tagIds?: string[];
+  annotations?: EuclidAnnotation[];
+  cropData?: { x: number; y: number; width: number; height: number };
+  error?: string;
+}
+
 export interface SaveClipRequest {
   clipType: ClipType;
   title: string;

@@ -7,6 +7,7 @@ import {
   EuclidSyncJob,
   EuclidAttachment,
   EuclidTemplate,
+  CaptureJob,
 } from '../types';
 
 interface EuclidDBSchema extends DBSchema {
@@ -44,6 +45,11 @@ interface EuclidDBSchema extends DBSchema {
     value: EuclidAttachment;
     indexes: { 'by-note': string };
   };
+  captureJobs: {
+    key: string;
+    value: CaptureJob;
+    indexes: { 'by-created': number };
+  };
   settings: {
     key: string;
     value: any;
@@ -54,36 +60,56 @@ let dbPromise: Promise<IDBPDatabase<EuclidDBSchema>> | null = null;
 
 export function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<EuclidDBSchema>('euclid_smart_clipper_db', 1, {
+    dbPromise = openDB<EuclidDBSchema>('euclid_smart_clipper_db', 2, {
       upgrade(db) {
         // Notes Store
-        const noteStore = db.createObjectStore('notes', { keyPath: 'id' });
-        noteStore.createIndex('by-updated', 'updated_at');
-        noteStore.createIndex('by-type', 'noteType');
-        noteStore.createIndex('by-sync', 'syncStatus');
-        noteStore.createIndex('by-folder', 'folder_id');
-        noteStore.createIndex('by-notebook', 'notebook_id');
+        if (!db.objectStoreNames.contains('notes')) {
+          const noteStore = db.createObjectStore('notes', { keyPath: 'id' });
+          noteStore.createIndex('by-updated', 'updated_at');
+          noteStore.createIndex('by-type', 'noteType');
+          noteStore.createIndex('by-sync', 'syncStatus');
+          noteStore.createIndex('by-folder', 'folder_id');
+          noteStore.createIndex('by-notebook', 'notebook_id');
+        }
 
         // Notebooks Store
-        db.createObjectStore('notebooks', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('notebooks')) {
+          db.createObjectStore('notebooks', { keyPath: 'id' });
+        }
 
         // Folders Store
-        const folderStore = db.createObjectStore('folders', { keyPath: 'id' });
-        folderStore.createIndex('by-notebook', 'notebookId');
+        if (!db.objectStoreNames.contains('folders')) {
+          const folderStore = db.createObjectStore('folders', { keyPath: 'id' });
+          folderStore.createIndex('by-notebook', 'notebookId');
+        }
 
         // Tags Store
-        db.createObjectStore('tags', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('tags')) {
+          db.createObjectStore('tags', { keyPath: 'id' });
+        }
 
         // Sync Jobs Store
-        const syncStore = db.createObjectStore('syncJobs', { keyPath: 'id' });
-        syncStore.createIndex('by-status', 'status');
+        if (!db.objectStoreNames.contains('syncJobs')) {
+          const syncStore = db.createObjectStore('syncJobs', { keyPath: 'id' });
+          syncStore.createIndex('by-status', 'status');
+        }
 
         // Attachments Store
-        const attachStore = db.createObjectStore('attachments', { keyPath: 'id' });
-        attachStore.createIndex('by-note', 'noteId');
+        if (!db.objectStoreNames.contains('attachments')) {
+          const attachStore = db.createObjectStore('attachments', { keyPath: 'id' });
+          attachStore.createIndex('by-note', 'noteId');
+        }
+
+        // Capture Jobs Store
+        if (!db.objectStoreNames.contains('captureJobs')) {
+          const captureStore = db.createObjectStore('captureJobs', { keyPath: 'id' });
+          captureStore.createIndex('by-created', 'createdAt');
+        }
 
         // Settings Store
-        db.createObjectStore('settings');
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings');
+        }
       },
     });
   }
@@ -202,5 +228,28 @@ export const localTagRepo = {
   async save(tag: EuclidTag): Promise<void> {
     const db = await getDB();
     await db.put('tags', tag);
+  },
+};
+
+export const localCaptureJobRepo = {
+  async save(job: CaptureJob): Promise<void> {
+    const db = await getDB();
+    await db.put('captureJobs', job);
+  },
+  async getById(id: string): Promise<CaptureJob | undefined> {
+    const db = await getDB();
+    return db.get('captureJobs', id);
+  },
+  async delete(id: string): Promise<void> {
+    const db = await getDB();
+    await db.delete('captureJobs', id);
+  },
+  async update(id: string, partial: Partial<CaptureJob>): Promise<CaptureJob | undefined> {
+    const db = await getDB();
+    const existing = await db.get('captureJobs', id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...partial };
+    await db.put('captureJobs', updated);
+    return updated;
   },
 };

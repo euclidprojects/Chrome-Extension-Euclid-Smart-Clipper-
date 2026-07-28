@@ -18,6 +18,7 @@ export default defineConfig(() => {
           main: path.resolve(__dirname, 'index.html'),
           popup: path.resolve(__dirname, 'popup.html'),
           sidepanel: path.resolve(__dirname, 'sidepanel.html'),
+          screenshot_editor: path.resolve(__dirname, 'screenshot-editor.html'),
         },
       },
     },

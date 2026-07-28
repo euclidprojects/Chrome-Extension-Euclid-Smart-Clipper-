@@ -69,6 +69,24 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
             });
             break;
 
+          case 'START_REGION_SELECTION':
+          case 'start_region_selection':
+            startRegionSelection();
+            sendResponse({ success: true, data: { status: 'selecting' } });
+            break;
+
+          case 'CANCEL_REGION_SELECTION':
+          case 'cancel_region_selection':
+            cleanupRegionSelection();
+            sendResponse({ success: true, data: { status: 'cancelled' } });
+            break;
+
+          case 'START_ELEMENT_SELECTION':
+          case 'start_element_selection':
+            startElementSelection();
+            sendResponse({ success: true, data: { status: 'selecting_element' } });
+            break;
+
           case 'GET_PAGE_METADATA':
           case 'extract_page_info':
             sendResponse({ success: true, data: getPageMetadata() });
@@ -705,6 +723,247 @@ function stopAnnotationMode() {
     annotationToolbarEl.remove();
     annotationToolbarEl = null;
   }
+}
+
+// 14. REGION SELECTION OVERLAY & EVENT HANDLERS
+let regionOverlayEl: HTMLElement | null = null;
+let isSelectingRegion = false;
+let startX = 0;
+let startY = 0;
+let currentRect: { x: number; y: number; width: number; height: number } | null = null;
+
+function startRegionSelection() {
+  cleanupRegionSelection();
+
+  regionOverlayEl = document.createElement('div');
+  regionOverlayEl.id = 'euclid-region-selection-overlay';
+  regionOverlayEl.style.cssText = `
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.4);
+    cursor: crosshair;
+    user-select: none;
+    font-family: system-ui, -apple-system, sans-serif;
+  `;
+
+  const banner = document.createElement('div');
+  banner.style.cssText = `
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 10px 20px;
+    border-radius: 12px;
+    border: 1px solid #10b981;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    font-size: 13px;
+    font-weight: 700;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  `;
+  banner.innerHTML = `<span style="color:#10b981">✂️</span> Drag to select an area • Press Esc or Click Cancel to stop`;
+  regionOverlayEl.appendChild(banner);
+
+  const box = document.createElement('div');
+  box.id = 'euclid-selection-box';
+  box.style.cssText = `
+    position: absolute;
+    display: none;
+    border: 2px solid #10b981;
+    background: rgba(16, 185, 129, 0.08);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+  `;
+
+  const badge = document.createElement('div');
+  badge.id = 'euclid-selection-badge';
+  badge.style.cssText = `
+    position: absolute;
+    top: -30px;
+    left: 0;
+    background: #10b981;
+    color: #064e3b;
+    font-weight: 800;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+  `;
+  box.appendChild(badge);
+
+  const controls = document.createElement('div');
+  controls.id = 'euclid-selection-controls';
+  controls.style.cssText = `
+    position: absolute;
+    bottom: -45px;
+    right: 0;
+    display: flex;
+    gap: 6px;
+  `;
+  controls.innerHTML = `
+    <button id="euclid-confirm-btn" style="background:#10b981; color:#fff; border:none; padding:6px 14px; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer; box-shadow:0 4px 12px rgba(16,185,129,0.4);">✓ Capture Area</button>
+    <button id="euclid-cancel-btn" style="background:#334155; color:#f1f5f9; border:none; padding:6px 12px; border-radius:8px; font-weight:700; font-size:12px; cursor:pointer;">✕ Cancel</button>
+  `;
+  box.appendChild(controls);
+
+  regionOverlayEl.appendChild(box);
+  document.body.appendChild(regionOverlayEl);
+
+  const onMouseDown = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest('#euclid-selection-controls')) return;
+    isSelectingRegion = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    box.style.display = 'block';
+    updateBox(e.clientX, e.clientY);
+  };
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isSelectingRegion) return;
+    updateBox(e.clientX, e.clientY);
+  };
+
+  const onMouseUp = () => {
+    if (isSelectingRegion) {
+      isSelectingRegion = false;
+    }
+  };
+
+  const updateBox = (clientX: number, clientY: number) => {
+    const left = Math.min(startX, clientX);
+    const top = Math.min(startY, clientY);
+    const width = Math.abs(clientX - startX);
+    const height = Math.abs(clientY - startY);
+
+    currentRect = { x: left, y: top, width, height };
+
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+
+    const dpr = window.devicePixelRatio || 1;
+    badge.textContent = `${Math.round(width * dpr)} × ${Math.round(height * dpr)} px`;
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      cleanupRegionSelection();
+      chrome.runtime.sendMessage({ type: 'CANCEL_REGION_SELECTION' }).catch(() => {});
+    }
+  };
+
+  regionOverlayEl.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('keydown', onKeyDown);
+
+  setTimeout(() => {
+    document.getElementById('euclid-confirm-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (currentRect && currentRect.width > 5 && currentRect.height > 5) {
+        const dpr = window.devicePixelRatio || 1;
+        const selectionData = {
+          selectionRect: {
+            x: (currentRect.x + window.scrollX) * dpr,
+            y: (currentRect.y + window.scrollY) * dpr,
+            width: currentRect.width * dpr,
+            height: currentRect.height * dpr,
+            viewportX: currentRect.x,
+            viewportY: currentRect.y,
+            viewportWidth: currentRect.width,
+            viewportHeight: currentRect.height,
+            devicePixelRatio: dpr,
+          },
+          sourceUrl: window.location.href,
+          sourceTitle: document.title,
+        };
+
+        cleanupRegionSelection();
+        chrome.runtime.sendMessage({
+          type: 'REGION_SELECTION_CONFIRMED',
+          data: selectionData,
+        }).catch((err) => console.error('Error sending region selection:', err));
+      } else {
+        alert('Please drag to select an area before confirming.');
+      }
+    });
+
+    document.getElementById('euclid-cancel-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanupRegionSelection();
+      chrome.runtime.sendMessage({ type: 'CANCEL_REGION_SELECTION' }).catch(() => {});
+    });
+  }, 100);
+}
+
+function cleanupRegionSelection() {
+  if (regionOverlayEl) {
+    regionOverlayEl.remove();
+    regionOverlayEl = null;
+  }
+  isSelectingRegion = false;
+  currentRect = null;
+}
+
+// 15. ELEMENT SELECTION OVERLAY
+let elementHoverEl: HTMLElement | null = null;
+
+function startElementSelection() {
+  const onMouseMove = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target || target === document.body || target === document.documentElement) return;
+
+    if (elementHoverEl) {
+      elementHoverEl.style.outline = '';
+    }
+    elementHoverEl = target;
+    elementHoverEl.style.outline = '3px solid #10b981';
+  };
+
+  const onClick = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('click', onClick, true);
+
+    if (elementHoverEl) {
+      elementHoverEl.style.outline = '';
+      const rect = elementHoverEl.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      const selectionData = {
+        selectionRect: {
+          x: (rect.left + window.scrollX) * dpr,
+          y: (rect.top + window.scrollY) * dpr,
+          width: rect.width * dpr,
+          height: rect.height * dpr,
+          viewportX: rect.left,
+          viewportY: rect.top,
+          viewportWidth: rect.width,
+          viewportHeight: rect.height,
+          devicePixelRatio: dpr,
+        },
+        sourceUrl: window.location.href,
+        sourceTitle: document.title,
+      };
+
+      chrome.runtime.sendMessage({
+        type: 'ELEMENT_SELECTED',
+        data: selectionData,
+      }).catch((err) => console.error('Error sending element selection:', err));
+      elementHoverEl = null;
+    }
+  };
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('click', onClick, true);
 }
 
 export {};

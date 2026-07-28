@@ -539,13 +539,17 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     return { success: false, error: 'Unknown screenshot mode.' };
   }
 
+  const OFFSCREEN_DOCUMENT_PATH = "offscreen.html";
+  let creatingOffscreenDocument: Promise<void> | null = null;
+
   async function hasOffscreenDocument(): Promise<boolean> {
-    if (typeof chrome === 'undefined') return false;
-    // @ts-ignore
+    if (typeof chrome === 'undefined' || !chrome.runtime) return false;
+    const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
     if ('getContexts' in chrome.runtime) {
       // @ts-ignore
       const contexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl],
       });
       return contexts.length > 0;
     }
@@ -554,6 +558,33 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return await chrome.offscreen.hasDocument();
     }
     return false;
+  }
+
+  async function setupOffscreenDocument(): Promise<void> {
+    console.info("[Google Auth] 3. Creating/checking offscreen document");
+    if (await hasOffscreenDocument()) {
+      console.info("[Google Auth] 4. Offscreen document ready");
+      return;
+    }
+
+    if (creatingOffscreenDocument) {
+      await creatingOffscreenDocument;
+      console.info("[Google Auth] 4. Offscreen document ready");
+      return;
+    }
+
+    creatingOffscreenDocument = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
+      justification: 'Complete Firebase Google authentication through a hosted iframe.',
+    });
+
+    try {
+      await creatingOffscreenDocument;
+      console.info("[Google Auth] 4. Offscreen document ready");
+    } finally {
+      creatingOffscreenDocument = null;
+    }
   }
 
   interface OffscreenGoogleAuthResponse {
@@ -573,49 +604,40 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   }
 
   async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
-    console.info("[Auth Debug] Calling function", {
-      functionName: "handleGoogleSignInOffscreen",
-      authExists: Boolean(auth),
-      appExists: true,
-      projectId: firebaseConfig?.projectId || "euclid-projects",
-      hasRequiredArguments: true
-    });
+    console.info("[Google Auth] 2. Service worker received request");
 
     if (!chrome.offscreen) {
       return { success: false, error: 'Offscreen API not supported' };
     }
 
     try {
-      const hasDoc = await hasOffscreenDocument();
-      if (!hasDoc) {
-        await chrome.offscreen.createDocument({
-          url: 'offscreen.html',
-          reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
-          justification: 'Complete Firebase Google authentication using a hosted authentication page.',
-        });
-      }
+      await setupOffscreenDocument();
 
-      const response = await new Promise<OffscreenGoogleAuthResponse | null>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'EUCLID_GOOGLE_SIGN_IN' }, (res) => {
-          if (chrome.runtime.lastError) {
-            console.error("[Auth Debug] Firebase failure", {
-              code: 'CHROME_RUNTIME_ERROR',
-              message: chrome.runtime.lastError.message,
-              name: 'ChromeRuntimeError',
-              context: 'background'
-            });
-            resolve({
-              success: false,
-              error: {
-                code: 'CHROME_RUNTIME_ERROR',
-                message: chrome.runtime.lastError.message || 'Offscreen document messaging failed.'
-              }
-            });
-          } else {
-            resolve(res || null);
-          }
-        });
-      });
+      console.info("[Google Auth] 5. Message sent to offscreen document");
+
+      const response = await Promise.race([
+        new Promise<OffscreenGoogleAuthResponse | null>((resolve) => {
+          chrome.runtime.sendMessage({ type: 'EUCLID_GOOGLE_SIGN_IN', target: 'offscreen' }, (res) => {
+            if (chrome.runtime.lastError) {
+              console.error("[Google Auth] Offscreen runtime error:", chrome.runtime.lastError.message);
+              resolve({
+                success: false,
+                error: {
+                  code: 'CHROME_RUNTIME_ERROR',
+                  message: chrome.runtime.lastError.message || 'Offscreen document messaging failed.'
+                }
+              });
+            } else {
+              resolve(res || null);
+            }
+          });
+        }),
+        new Promise<null>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Offscreen authentication did not respond within timeout."));
+          }, 35000);
+        })
+      ]);
 
       if (!response) {
         throw new Error("The offscreen authentication page returned no response.");
@@ -630,21 +652,14 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       const idToken = typeof response.idToken === "string" && response.idToken.trim() ? response.idToken.trim() : undefined;
       const accessToken = typeof response.accessToken === "string" && response.accessToken.trim() ? response.accessToken.trim() : undefined;
 
-      console.info("[Google Auth] Offscreen response received:", {
-        responseExists: Boolean(response),
-        success: response?.success,
-        hasIdToken: typeof response?.idToken === "string" && response.idToken.length > 0,
-        hasAccessToken: typeof response?.accessToken === "string" && response.accessToken.length > 0,
-        hasUser: Boolean(response?.user)
+      console.info("[Google Auth] 10. Response returned to service worker", {
+        success: response.success,
+        hasUser: Boolean(response.user),
+        hasIdToken: Boolean(idToken),
+        hasAccessToken: Boolean(accessToken)
       });
 
       if (idToken || accessToken) {
-        console.info("[Google Auth] Creating credential:", {
-          authExists: Boolean(auth),
-          hasIdToken: Boolean(idToken),
-          hasAccessToken: Boolean(accessToken)
-        });
-
         if (!auth) {
           throw new Error("Firebase Auth instance is missing.");
         }
@@ -669,18 +684,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         throw new Error("Google authentication returned no valid ID token or access token.");
       }
     } catch (err: any) {
-      console.error("[Google Auth] Failure:", {
-        code: err?.code || 'GOOGLE_AUTH_ERROR',
-        message: err?.message,
-        stack: err?.stack,
-        function: "handleGoogleSignInOffscreen"
-      });
+      console.error("[Google Auth] Failure in service worker:", err);
       return {
         success: false,
         error: err?.message || "Google Sign-In returned invalid authentication data. Please try again."
       };
+    } finally {
+      try {
+        if (await hasOffscreenDocument()) {
+          await chrome.offscreen.closeDocument();
+        }
+      } catch (error) {
+        console.warn("Could not close offscreen document:", error);
+      }
     }
   }
+
 }
 
 export {};

@@ -183,6 +183,7 @@ export type AnnotationType =
   | 'arrow'
   | 'rectangle'
   | 'circle'
+  | 'line'
   | 'text_box'
   | 'blur'
   | 'pixelate'
@@ -205,6 +206,7 @@ export interface EuclidAnnotation {
   xpath?: string;
   cssSelector?: string;
   boundingRect?: { x: number; y: number; width: number; height: number };
+  points?: { x: number; y: number }[];
   pageNumber?: number;
   videoTimestamp?: number;
   drawingData?: any;

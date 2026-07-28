@@ -53,15 +53,19 @@ export default function App() {
   // Onboarding
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
 
-  // Manage #root class based on activeView
+  // Manage #root, html, body class based on activeView
   useEffect(() => {
     const rootEl = document.getElementById('root');
-    if (rootEl) {
-      if (activeView === 'popup') {
-        rootEl.classList.remove('is-full-workspace');
-      } else {
-        rootEl.classList.add('is-full-workspace');
-      }
+    const htmlEl = document.documentElement;
+    const bodyEl = document.body;
+    if (activeView === 'popup') {
+      rootEl?.classList.remove('is-full-workspace');
+      htmlEl?.classList.remove('is-full-workspace');
+      bodyEl?.classList.remove('is-full-workspace');
+    } else {
+      rootEl?.classList.add('is-full-workspace');
+      htmlEl?.classList.add('is-full-workspace');
+      bodyEl?.classList.add('is-full-workspace');
     }
   }, [activeView]);
 

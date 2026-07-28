@@ -37,6 +37,12 @@ import {
   Clock,
   Globe,
   FileCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   CaptureJob,
@@ -94,6 +100,10 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
+  // Collapsible Side Panels
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
   // Active Tool & Contextual Settings
   const [activeTool, setActiveTool] = useState<AnnotationToolId>('highlight');
@@ -215,6 +225,24 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, [isFitToScreen, handleFitToScreen]);
+
+  // Handle Wheel Zoom (Ctrl/Cmd + Wheel)
+  useEffect(() => {
+    const viewport = containerRef.current;
+    if (!viewport) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+        setZoomLevel((prev) => Math.max(0.1, Math.min(5.0, prev * zoomFactor)));
+        setIsFitToScreen(false);
+      }
+    };
+
+    viewport.addEventListener('wheel', handleWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', handleWheel);
+  }, []);
 
   // Redraw Canvas
   const redrawCanvas = useCallback(() => {
@@ -482,14 +510,18 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
       
       {/* ROW 1: COMPACT FULL-WIDTH HEADER */}
       <header className="h-[52px] px-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-xl z-30 min-w-0">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+        <div className="flex items-center gap-3 min-w-0 flex-1 editor-source-info">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 border border-amber-300/60 shadow-[0_0_12px_rgba(251,191,36,0.3)] flex items-center justify-center shrink-0">
             <Sparkles className="w-4.5 h-4.5 text-amber-300" />
           </div>
           
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
-              <h1 className="font-extrabold text-[14px] text-white tracking-tight truncate" title={job.sourceTitle || 'Captured Screenshot'}>
+              <span className="font-extrabold text-[12px] text-amber-300 uppercase tracking-wider shrink-0 hidden sm:inline">
+                Screenshot Editor
+              </span>
+              <span className="text-slate-500 shrink-0 hidden sm:inline">•</span>
+              <h1 className="editor-source-title font-extrabold text-[13px] text-white tracking-tight truncate" title={job.sourceTitle || 'Captured Screenshot'}>
                 {job.sourceTitle || 'Captured Screenshot'}
               </h1>
               
@@ -503,7 +535,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2 text-[11px] text-emerald-300/90 font-mono min-w-0">
-              <span className="truncate" title={job.sourceUrl}>{job.sourceUrl || 'https://notes.app.euclidprojects.org'}</span>
+              <span className="editor-source-url truncate" title={job.sourceUrl}>{job.sourceUrl || 'https://notes.app.euclidprojects.org'}</span>
               <span className="shrink-0 text-emerald-600">•</span>
               <span className="shrink-0 text-slate-400">{new Date(job.createdAt || Date.now()).toLocaleTimeString()}</span>
             </div>
@@ -546,13 +578,33 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
       </div>
 
       {/* ROW 3: MAIN 3-COLUMN WORKSPACE */}
-      <div className="editor-main min-height-0 grid grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,300px)] overflow-hidden">
+      <div className={`editor-main min-height-0 flex-1 grid overflow-hidden transition-all duration-200 ${
+        isLeftCollapsed && isRightCollapsed
+          ? 'grid-cols-[0px_minmax(0,1fr)_0px]'
+          : isLeftCollapsed
+          ? 'grid-cols-[0px_minmax(0,1fr)_minmax(240px,300px)]'
+          : isRightCollapsed
+          ? 'grid-cols-[minmax(190px,240px)_minmax(0,1fr)_0px]'
+          : 'grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,300px)]'
+      }`}>
         
         {/* COLUMN 1: LEFT TOOL SETTINGS PANEL */}
-        <div className="bg-[#0D121A] border-r border-slate-800/80 p-3.5 flex flex-col gap-3 overflow-y-auto shrink-0">
-          <div className="flex items-center gap-2 text-[12px] font-extrabold text-amber-300 uppercase tracking-wider pb-2 border-b border-slate-800">
-            <Sliders className="w-4 h-4 text-emerald-400" />
-            <span>Tool Settings</span>
+        <div className={`editor-tool-settings bg-[#0D121A] border-r border-slate-800/80 p-3.5 flex flex-col gap-3 overflow-y-auto shrink-0 transition-all ${
+          isLeftCollapsed ? 'hidden' : 'block'
+        }`}>
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2 text-[12px] font-extrabold text-amber-300 uppercase tracking-wider">
+              <Sliders className="w-4 h-4 text-emerald-400" />
+              <span>Tool Settings</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsLeftCollapsed(true)}
+              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 cursor-pointer"
+              title="Collapse Tool Settings"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Active Tool Info Box */}
@@ -701,6 +753,28 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
           ref={containerRef}
           className="canvas-viewport flex-1 relative min-w-0 min-height-0 overflow-auto flex items-center justify-center bg-[#0b1017] p-6"
         >
+          {isLeftCollapsed && (
+            <button
+              onClick={() => setIsLeftCollapsed(false)}
+              className="absolute top-3 left-3 z-20 px-2.5 py-1.5 bg-[#0D121A] hover:bg-slate-800 text-amber-300 border border-slate-700 rounded-lg text-[11px] font-bold flex items-center gap-1.5 shadow-xl cursor-pointer"
+              title="Expand Tool Settings"
+            >
+              <PanelLeftOpen className="w-4 h-4 text-emerald-400" />
+              <span>Settings</span>
+            </button>
+          )}
+
+          {isRightCollapsed && (
+            <button
+              onClick={() => setIsRightCollapsed(false)}
+              className="absolute top-3 right-3 z-20 px-2.5 py-1.5 bg-[#0D121A] hover:bg-slate-800 text-amber-300 border border-slate-700 rounded-lg text-[11px] font-bold flex items-center gap-1.5 shadow-xl cursor-pointer"
+              title="Expand Clip Details"
+            >
+              <span>Clip Details</span>
+              <PanelRightOpen className="w-4 h-4 text-emerald-400" />
+            </button>
+          )}
+
           {!isImageLoaded ? (
             <div className="flex flex-col items-center justify-center gap-3">
               <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
@@ -725,7 +799,9 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
         </div>
 
         {/* COLUMN 3: RIGHT CLIP DETAILS & DESTINATION PANEL */}
-        <div className="bg-[#0D121A] border-l border-slate-800/80 flex flex-col overflow-y-auto shrink-0 divide-y divide-slate-800/80">
+        <div className={`bg-[#0D121A] border-l border-slate-800/80 flex flex-col overflow-y-auto shrink-0 divide-y divide-slate-800/80 transition-all ${
+          isRightCollapsed ? 'hidden' : 'block'
+        }`}>
           
           <div className="p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -734,20 +810,31 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
                 <span>Clip Details</span>
               </span>
 
-              <div className="flex items-center gap-1 bg-[#060A0F] p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 bg-[#060A0F] p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setDestMode('create_new')}
+                    className={`px-2 py-0.5 rounded ${destMode === 'create_new' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                  >
+                    New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDestMode('add_to_existing')}
+                    className={`px-2 py-0.5 rounded ${destMode === 'add_to_existing' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                  >
+                    Existing
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => setDestMode('create_new')}
-                  className={`px-2 py-0.5 rounded ${destMode === 'create_new' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                  onClick={() => setIsRightCollapsed(true)}
+                  className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 cursor-pointer"
+                  title="Collapse Clip Details"
                 >
-                  New Note
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDestMode('add_to_existing')}
-                  className={`px-2 py-0.5 rounded ${destMode === 'add_to_existing' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
-                >
-                  Existing Note
+                  <PanelRightClose className="w-4 h-4" />
                 </button>
               </div>
             </div>

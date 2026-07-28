@@ -6,19 +6,18 @@ import {
   EuclidFolder,
   EuclidTag,
   EuclidNote,
-} from './types';
+} from '../types';
 import {
-  getDB,
   initializeLocalDefaults,
   localNoteRepo,
   localNotebookRepo,
   localFolderRepo,
   localTagRepo,
   localCaptureJobRepo,
-} from './storage/indexedDB';
-import { ScreenshotEditorView } from './components/ScreenshotEditorView';
+} from '../storage/indexedDB';
+import { ScreenshotEditorView } from '../components/ScreenshotEditorView';
 import { RefreshCw, AlertCircle } from 'lucide-react';
-import './screenshot-editor/screenshot-editor.css';
+import './screenshot-editor.css';
 
 const EditorApp: React.FC = () => {
   const [job, setJob] = useState<CaptureJob | null>(null);
@@ -156,7 +155,7 @@ const EditorApp: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="w-screen h-screen bg-[#0F1115] text-slate-200 flex flex-col items-center justify-center gap-3">
+      <div className="w-screen h-screen bg-[#071018] text-slate-200 flex flex-col items-center justify-center gap-3">
         <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
         <p className="font-bold text-[14px] text-amber-300">Loading Euclid Screenshot Editor…</p>
       </div>
@@ -165,15 +164,25 @@ const EditorApp: React.FC = () => {
 
   if (error || !job) {
     return (
-      <div className="w-screen h-screen bg-[#0F1115] text-slate-200 flex flex-col items-center justify-center gap-3 p-4">
+      <div className="w-screen h-screen bg-[#071018] text-slate-200 flex flex-col items-center justify-center gap-3 p-4 text-center">
         <AlertCircle className="w-10 h-10 text-red-400" />
-        <p className="font-bold text-[15px] text-red-300">{error || 'Capture Job not found.'}</p>
-        <button
-          onClick={() => window.close()}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-[13px]"
-        >
-          Close Window
-        </button>
+        <p className="font-bold text-[15px] text-red-300">
+          {error || 'Screenshot capture data could not be found. Please retake the screenshot.'}
+        </p>
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={handleRetake}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-[13px]"
+          >
+            Retake Screenshot
+          </button>
+          <button
+            onClick={() => window.close()}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-[13px]"
+          >
+            Close Window
+          </button>
+        </div>
       </div>
     );
   }

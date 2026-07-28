@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "clean": "node -e \"import('fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
-    "build": "npm run clean && node generate-pngs.js && vite build && esbuild src/background/serviceWorker.ts --bundle --outfile=dist/service-worker.js --format=esm && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-extension-build.mjs",
+    "build": "npm run clean && node generate-pngs.js && vite build && esbuild src/background/serviceWorker.ts --bundle --outfile=dist/service-worker.js --format=esm && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-screenshot-editor-fix.mjs && node scripts/verify-extension-build.mjs",
     "test": "node scripts/verify-ui-requirements.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit"

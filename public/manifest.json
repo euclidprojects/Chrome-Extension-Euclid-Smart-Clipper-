@@ -37,6 +37,12 @@
     "tabs"
   ],
 
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtu.be/*",
+    "https://music.youtube.com/*"
+  ],
+
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

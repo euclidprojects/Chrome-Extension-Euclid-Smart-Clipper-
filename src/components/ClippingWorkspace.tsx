@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   PenTool,
@@ -29,6 +29,7 @@ import {
   Maximize2,
   Edit3,
   Play,
+  Link as LinkIcon,
 } from 'lucide-react';
 import {
   EuclidNotebook,
@@ -36,11 +37,22 @@ import {
   EuclidTag,
   EuclidNote,
   EuclidNoteType,
+  EuclidVideoNote,
   ClipType,
   ScreenshotMode,
 } from '../types';
 import { clippingService } from '../services/clippingService';
 import { isSupportedPage } from '../utils/pageUtils';
+import {
+  extractYouTubeVideoId,
+  extractYouTubePlaylistId,
+  isYouTubeVideoUrl,
+  cleanCanonicalYouTubeUrl,
+  getTimestampedYouTubeUrl,
+  getYouTubeThumbnailUrl,
+  parseTimestampToSeconds,
+  formatSecondsToTimestamp,
+} from '../utils/youtubeUtils';
 
 interface ClippingWorkspaceProps {
   notebooks: EuclidNotebook[];
@@ -109,6 +121,16 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const [ytTimestampInputText, setYtTimestampInputText] = useState<string>('02:45');
   const [ytTimestampError, setYtTimestampError] = useState<string | null>(null);
   const [isUserEditedYtTimestamp, setIsUserEditedYtTimestamp] = useState<boolean>(false);
+
+  // YouTube Video URL State
+  const [ytVideoUrl, setYtVideoUrl] = useState<string>('');
+  const [ytCanonicalUrl, setYtCanonicalUrl] = useState<string>('');
+  const [ytVideoId, setYtVideoId] = useState<string | null>(null);
+  const [ytChannelName, setYtChannelName] = useState<string>('');
+  const [ytVideoTitle, setYtVideoTitle] = useState<string>('');
+  const [isUserEditedYtUrl, setIsUserEditedYtUrl] = useState<boolean>(false);
+  const [ytUrlCopied, setYtUrlCopied] = useState<boolean>(false);
+  const [ytUrlRefreshStatus, setYtUrlRefreshStatus] = useState<boolean>(false);
 
   // Helper: Parse MM:SS or HH:MM:SS string to total seconds (-1 if invalid)
   const parseTimestampToSeconds = (str: string): number => {
@@ -364,11 +386,136 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     }
   }, [pageTitle]);
 
-  // Check current page domain / type
+  // Helper: Refresh YouTube URL from active tab
+  const refreshYouTubeUrl = useCallback((forced = false) => {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs[0];
+        if (activeTab?.url) {
+          const rawUrl = activeTab.url;
+          const validYt = isYouTubeVideoUrl(rawUrl);
+          if (validYt) {
+            const canonical = cleanCanonicalYouTubeUrl(rawUrl);
+            const vidId = extractYouTubeVideoId(rawUrl);
+
+            if (!isUserEditedYtUrl || forced) {
+              setYtVideoUrl(rawUrl);
+              setYtCanonicalUrl(canonical);
+              setYtVideoId(vidId);
+              setIsUserEditedYtUrl(false);
+            }
+            setIsYouTubePage(true);
+
+            if (activeTab.title) {
+              setYtVideoTitle(activeTab.title);
+            }
+
+            if (activeTab.id) {
+              chrome.tabs.sendMessage(
+                activeTab.id,
+                { type: 'GET_YOUTUBE_METADATA' },
+                (res) => {
+                  if (chrome.runtime.lastError) return;
+                  if (res?.success && res?.data) {
+                    if (res.data.channelName) setYtChannelName(res.data.channelName);
+                    if (res.data.title) {
+                      setYtVideoTitle(res.data.title);
+                    }
+                  }
+                }
+              );
+            }
+          } else {
+            if (forced) {
+              setYtVideoUrl(rawUrl);
+              setYtCanonicalUrl('');
+              setYtVideoId(null);
+              setIsYouTubePage(false);
+            } else if (!ytVideoUrl) {
+              setYtVideoUrl(rawUrl);
+            }
+          }
+        }
+      });
+    } else if (!ytVideoUrl) {
+      const fallbackUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+      setYtVideoUrl(fallbackUrl);
+      setYtCanonicalUrl(cleanCanonicalYouTubeUrl(fallbackUrl));
+      setYtVideoId(extractYouTubeVideoId(fallbackUrl));
+      setIsYouTubePage(true);
+      setYtVideoTitle('Euclid Geometry & Mathematical Logic');
+      setYtChannelName('Euclid Academy');
+    }
+  }, [isUserEditedYtUrl, ytVideoUrl]);
+
+  // Initial tab detection and YouTube URL refresh
   useEffect(() => {
-    const checkYouTube = url.includes('youtube.com') || url.includes('youtu.be');
-    setIsYouTubePage(checkYouTube);
-  }, [url]);
+    refreshYouTubeUrl(false);
+  }, [refreshYouTubeUrl]);
+
+  // Whenever clip option changes to 'youtube_note', refresh YouTube URL
+  useEffect(() => {
+    if (selectedClipType === 'youtube_note') {
+      refreshYouTubeUrl(false);
+    }
+  }, [selectedClipType, refreshYouTubeUrl]);
+
+  // Handlers for manual YouTube URL editing & buttons
+  const handleYtUrlInputChange = (newUrl: string) => {
+    setYtVideoUrl(newUrl);
+    setIsUserEditedYtUrl(true);
+
+    if (isYouTubeVideoUrl(newUrl)) {
+      const canonical = cleanCanonicalYouTubeUrl(newUrl);
+      const vidId = extractYouTubeVideoId(newUrl);
+      setYtCanonicalUrl(canonical);
+      setYtVideoId(vidId);
+      setIsYouTubePage(true);
+    } else {
+      setYtCanonicalUrl('');
+      setYtVideoId(null);
+    }
+  };
+
+  const handleCopyYtUrlClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sec = parseTimestampToSeconds(ytTimestamp);
+    const targetUrl = sec > 0
+      ? getTimestampedYouTubeUrl(ytCanonicalUrl || ytVideoUrl, sec)
+      : (ytCanonicalUrl || ytVideoUrl);
+
+    if (targetUrl) {
+      navigator.clipboard.writeText(targetUrl);
+      setYtUrlCopied(true);
+      setTimeout(() => setYtUrlCopied(false), 2000);
+    }
+  };
+
+  const handleOpenYtVideoClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sec = parseTimestampToSeconds(ytTimestamp);
+    const targetUrl = sec > 0
+      ? getTimestampedYouTubeUrl(ytCanonicalUrl || ytVideoUrl, sec)
+      : (ytCanonicalUrl || ytVideoUrl);
+
+    if (targetUrl) {
+      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: targetUrl });
+      } else {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  };
+
+  const handleRefreshUrlClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setYtUrlRefreshStatus(true);
+    refreshYouTubeUrl(true);
+    setTimeout(() => setYtUrlRefreshStatus(false), 1000);
+  };
 
   // Fetch initial YouTube video metadata/timestamp if not manually edited yet
   useEffect(() => {
@@ -620,8 +767,49 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         .map((t) => t.name);
 
       let content = `<p>${noteRemark}</p>`;
-      if (selectedClipType === 'youtube_note' && ytNoteInput) {
-        content = `<div><p><strong>Timestamp [${ytTimestamp}]:</strong> ${ytNoteInput}</p><p>${noteRemark}</p></div>`;
+      let videoDataPayload: EuclidVideoNote | undefined = undefined;
+      const effectiveSec = parseTimestampToSeconds(ytTimestamp);
+      const effectiveUrl = ytVideoUrl || url;
+      const canonical = ytCanonicalUrl || cleanCanonicalYouTubeUrl(effectiveUrl);
+      const timestamped = getTimestampedYouTubeUrl(canonical || effectiveUrl, effectiveSec > 0 ? effectiveSec : 0);
+      const vidId = ytVideoId || extractYouTubeVideoId(effectiveUrl) || '';
+      const thumb = vidId ? getYouTubeThumbnailUrl(vidId) : faviconUrl;
+      const finalTitle = noteTitle || ytVideoTitle || pageTitle;
+
+      if (selectedClipType === 'youtube_note') {
+        content = `
+          <div class="youtube-note-clip p-3 bg-slate-900 border border-red-500/30 rounded-xl space-y-2">
+            <h3 class="text-sm font-bold text-white">${finalTitle}</h3>
+            ${ytChannelName ? `<p class="text-xs text-slate-400">Channel: ${ytChannelName}</p>` : ''}
+            <p class="text-xs font-semibold text-amber-300">
+              Timestamp: <a href="${timestamped}" target="_blank" rel="noopener noreferrer" class="underline text-amber-300">${ytTimestamp}</a>
+            </p>
+            ${ytNoteInput ? `<blockquote class="p-2 bg-slate-800 rounded border-l-2 border-red-500 text-xs text-slate-200 italic">${ytNoteInput}</blockquote>` : ''}
+            ${noteRemark ? `<p class="text-xs text-slate-300">${noteRemark}</p>` : ''}
+            <p class="text-[11px] text-slate-400 mt-2">Video Link: <a href="${timestamped}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 underline">${timestamped}</a></p>
+          </div>
+        `.trim();
+
+        videoDataPayload = {
+          videoId: vidId,
+          platform: 'youtube',
+          videoTitle: ytVideoTitle || finalTitle,
+          channelName: ytChannelName || author || 'YouTube',
+          videoUrl: effectiveUrl,
+          embedUrl: vidId ? `https://www.youtube.com/embed/${vidId}` : undefined,
+          thumbnailUrl: thumb,
+          duration: ytVideoDuration,
+          timestampNotes: [
+            {
+              id: 'yt_ts_' + Date.now(),
+              timestamp: effectiveSec > 0 ? effectiveSec : 0,
+              formattedTime: ytTimestamp,
+              title: `Note at ${ytTimestamp}`,
+              content: ytNoteInput || noteRemark || 'YouTube timestamp note',
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        };
       } else if (selectedClipType === 'simplified_article') {
         const extractedArticle = clippingService.extractSimplifiedArticle(
           `<div><h1>${noteTitle}</h1><p>${noteRemark}</p></div>`,
@@ -637,10 +825,10 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       const noteToSave: EuclidNote = {
         id: newNoteId,
         user_id: 'local-user',
-        title: noteTitle || pageTitle,
+        title: finalTitle,
         content,
-        plainTextContent: noteRemark,
-        markdownContent: `# ${noteTitle}\n\n${noteRemark}`,
+        plainTextContent: selectedClipType === 'youtube_note' ? `YouTube Note [${ytTimestamp}]: ${ytNoteInput}\n${noteRemark}` : noteRemark,
+        markdownContent: selectedClipType === 'youtube_note' ? `# ${finalTitle}\n\n**Timestamp:** [${ytTimestamp}](${timestamped})\n\n> ${ytNoteInput}\n\n${noteRemark}` : `# ${finalTitle}\n\n${noteRemark}`,
         notebook_id: selectedNotebookId,
         folder_id: selectedFolderId || null,
         tags: selectedTagNames,
@@ -651,7 +839,9 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         sourceDomain: domainName(),
         sourceAuthor: author,
         sourceFavicon: faviconUrl,
+        sourceThumbnail: selectedClipType === 'youtube_note' ? thumb : undefined,
         clipFormat: selectedClipType || 'bookmark',
+        videoData: videoDataPayload,
         wordCount: noteRemark.split(/\s+/).filter(Boolean).length || 10,
         readingTime: 1,
         extensionCreated: true,
@@ -660,6 +850,14 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
+
+      if (selectedClipType === 'youtube_note') {
+        noteToSave.sourceUrl = effectiveUrl;
+        noteToSave.canonicalUrl = canonical;
+        noteToSave.sourceTitle = finalTitle;
+        noteToSave.sourceDomain = 'youtube.com';
+        noteToSave.sourceAuthor = ytChannelName || author;
+      }
 
       await onSaveNote(noteToSave);
       setIsSaving(false);
@@ -966,6 +1164,86 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                       <span>{ytTimestampError}</span>
                     </div>
                   )}
+
+                  {/* VIDEO URL FIELD & ACTION BUTTONS */}
+                  <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <label className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                        <LinkIcon className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Video URL</span>
+                      </label>
+
+                      {isYouTubeVideoUrl(ytVideoUrl) ? (
+                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-500/40 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span>Current YouTube video detected</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-500/40 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 text-amber-300" />
+                          <span>Not a supported YouTube URL</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {/* Editable URL Input */}
+                      <div className="relative flex-1 min-w-0">
+                        <input
+                          type="text"
+                          value={ytVideoUrl}
+                          onChange={(e) => handleYtUrlInputChange(e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          title={ytVideoUrl || 'YouTube video URL'}
+                          className="w-full h-8 px-2.5 bg-[#080b0f] border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-lg text-[11px] font-mono text-slate-200 outline-none transition-all truncate pr-2"
+                        />
+                      </div>
+
+                      {/* Compact Action Buttons */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* Copy URL */}
+                        <button
+                          type="button"
+                          onClick={handleCopyYtUrlClick}
+                          disabled={!ytVideoUrl}
+                          className="px-2 py-1 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-emerald-300 border border-slate-800 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
+                          title="Copy YouTube video URL (with timestamp)"
+                        >
+                          <Copy className="w-3 h-3 text-amber-300" />
+                          <span>{ytUrlCopied ? 'Copied!' : 'Copy URL'}</span>
+                        </button>
+
+                        {/* Open Video */}
+                        <button
+                          type="button"
+                          onClick={handleOpenYtVideoClick}
+                          disabled={!ytVideoUrl}
+                          className="px-2 py-1 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-emerald-300 border border-slate-800 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40"
+                          title="Open YouTube video in new tab"
+                        >
+                          <ExternalLink className="w-3 h-3 text-emerald-400" />
+                          <span>Open Video</span>
+                        </button>
+
+                        {/* Refresh URL */}
+                        <button
+                          type="button"
+                          onClick={handleRefreshUrlClick}
+                          className="p-1.5 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-emerald-300 border border-slate-800 transition-colors cursor-pointer flex items-center justify-center"
+                          title="Refresh URL from active tab"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${ytUrlRefreshStatus ? 'animate-spin' : ''}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!isYouTubeVideoUrl(ytVideoUrl) && (
+                      <p className="text-[10px] font-medium text-amber-300/90 bg-amber-950/40 p-1.5 rounded-md border border-amber-500/20">
+                        Open a YouTube video to create a YouTube Note.
+                      </p>
+                    )}
+                  </div>
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 block mb-1">Timestamped Note</label>

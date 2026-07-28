@@ -945,22 +945,34 @@ function detectMediaData() {
 }
 
 function getYouTubeMetadata() {
-  const isYouTube = window.location.hostname.includes('youtube.com') && window.location.pathname.includes('/watch');
-  if (!isYouTube) return null;
+  const host = window.location.hostname.toLowerCase();
+  const isYouTubeHost = host.includes('youtube.com') || host.includes('youtu.be');
+  if (!isYouTubeHost) return null;
 
   const videoEl = document.querySelector('video') as HTMLVideoElement | null;
-  const titleEl = document.querySelector('h1.ytd-watch-metadata yt-formatted-string') || document.querySelector('h1.title');
-  const channelEl = document.querySelector('ytd-channel-name a') || document.querySelector('#owner #channel-name a');
+  const titleEl =
+    document.querySelector('h1.ytd-watch-metadata yt-formatted-string') ||
+    document.querySelector('h1.title') ||
+    document.querySelector('yt-formatted-string.ytd-video-primary-info-renderer');
+  const channelEl =
+    document.querySelector('ytd-channel-name a') ||
+    document.querySelector('#owner #channel-name a') ||
+    document.querySelector('.ytd-channel-name');
+
+  let videoId = new URLSearchParams(window.location.search).get('v') || '';
+  if (!videoId && window.location.pathname.includes('/shorts/')) {
+    videoId = window.location.pathname.split('/shorts/')[1]?.split('?')[0]?.split('/')[0] || '';
+  }
 
   return {
     isYouTube: true,
-    videoId: new URLSearchParams(window.location.search).get('v') || '',
-    title: titleEl?.textContent?.trim() || document.title,
+    videoId,
+    title: titleEl?.textContent?.trim() || document.title.replace('- YouTube', '').trim(),
     channelName: channelEl?.textContent?.trim() || '',
     channelUrl: (channelEl as HTMLAnchorElement)?.href || '',
     currentTime: videoEl ? Math.floor(videoEl.currentTime) : 0,
     duration: videoEl ? Math.floor(videoEl.duration) : 0,
-    url: window.location.href
+    url: window.location.href,
   };
 }
 

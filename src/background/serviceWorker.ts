@@ -526,17 +526,34 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     return { success: false, error: 'Unknown screenshot mode.' };
   }
 
+  async function hasOffscreenDocument(): Promise<boolean> {
+    if (typeof chrome === 'undefined') return false;
+    // @ts-ignore
+    if ('getContexts' in chrome.runtime) {
+      // @ts-ignore
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+      });
+      return contexts.length > 0;
+    }
+    if (chrome.offscreen && 'hasDocument' in chrome.offscreen) {
+      // @ts-ignore
+      return await chrome.offscreen.hasDocument();
+    }
+    return false;
+  }
+
   async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
     if (!chrome.offscreen) {
       return { success: false, error: 'Offscreen API not supported' };
     }
 
     try {
-      const hasDoc = await chrome.offscreen.hasDocument();
+      const hasDoc = await hasOffscreenDocument();
       if (!hasDoc) {
         await chrome.offscreen.createDocument({
           url: 'offscreen.html',
-          reasons: [chrome.offscreen.Reason.DOM_SCRAPING || 'DOM_PARSER'],
+          reasons: [(chrome.offscreen.Reason as any)?.DOM_SCRAPING || 'DOM_PARSER'],
           justification: 'Firebase Google Auth in offscreen document',
         });
       }
@@ -544,6 +561,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return new Promise((resolve) => {
         chrome.runtime.sendMessage({ type: 'GOOGLE_SIGN_IN_OFFSCREEN' }, (res) => {
           if (chrome.runtime.lastError) {
+            console.error("Authentication failure", {
+              code: chrome.runtime.lastError.message,
+              message: chrome.runtime.lastError.message,
+              context: "service-worker"
+            });
             resolve({ success: false, error: chrome.runtime.lastError.message });
           } else {
             resolve(res || { success: false, error: 'No response from offscreen document' });
@@ -551,6 +573,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         });
       });
     } catch (err: any) {
+      console.error("Authentication failure", {
+        code: err?.code || err?.message,
+        message: err?.message,
+        context: "service-worker"
+      });
       return { success: false, error: err?.message || 'Offscreen Auth Failed' };
     }
   }

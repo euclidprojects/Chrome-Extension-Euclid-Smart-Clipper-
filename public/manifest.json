@@ -35,9 +35,12 @@
     "scripting",
     "downloads",
     "tabs",
-    "identity",
     "offscreen"
   ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://apis.google.com https://www.gstatic.com https://www.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://euclid-projects.firebaseapp.com https://euclid-projects.web.app https://*.firebaseapp.com https://*.firebaseio.com https://*.euclidprojects.org;"
+  },
 
   "host_permissions": [
     "https://www.youtube.com/*",

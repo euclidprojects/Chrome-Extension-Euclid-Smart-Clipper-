@@ -1,7 +1,5 @@
 import { firebaseApp, auth, firestore, firebaseStorage, firebaseConfig } from '../lib/firebase';
 import {
-  GoogleAuthProvider,
-  signInWithPopup,
   signOut as fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -10,7 +8,8 @@ import {
   sendEmailVerification,
   updateProfile,
   User as FirebaseUser,
-} from 'firebase/auth';
+} from 'firebase/auth/web-extension';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, getDoc, collection, getDocs, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 

@@ -1,5 +1,4 @@
-import { auth, googleProvider } from '../firebase/config';
-import { signInWithPopup, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
+import { auth, googleProvider, signInWithPopup } from '../firebase/config';
 
 if (typeof window !== 'undefined') {
   console.info("Euclid Smart Clipper extension ID:", typeof chrome !== "undefined" && chrome?.runtime?.id ? chrome.runtime.id : "web-preview");

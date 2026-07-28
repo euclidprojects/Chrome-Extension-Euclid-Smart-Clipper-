@@ -1,6 +1,7 @@
 import {
   auth,
   db,
+  firebaseConfig,
   googleProvider,
   signInWithPopup,
   fbSignOut,
@@ -118,6 +119,17 @@ class AuthService {
   private init() {
     if (this.unsubscribeFirebase) return;
 
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      console.info("Extension ID:", chrome.runtime.id);
+      console.info("Firebase project:", firebaseConfig.projectId);
+      console.info("Auth domain:", firebaseConfig.authDomain);
+      console.info("Offscreen API available:", Boolean(chrome.offscreen));
+    }
+
+    // Ensure initial startup state has no stale errors
+    this.state.error = null;
+    this.state.errorCode = null;
+
     this.unsubscribeFirebase = onAuthStateChanged(
       auth,
       async (fbUser) => {
@@ -131,7 +143,11 @@ class AuthService {
               errorCode: null,
             });
           } catch (e: any) {
-            console.error('Error loading user profile:', e);
+            console.error("Authentication failure", {
+              code: e?.code,
+              message: e?.message,
+              context: "popup"
+            });
             this.updateState({
               status: 'signed-in',
               user: {
@@ -149,7 +165,7 @@ class AuthService {
             });
           }
         } else {
-          // Signed out is NOT an error
+          // Signed-out is NORMAL and MUST NOT create an error
           this.updateState({
             status: 'signed-out',
             user: null,
@@ -159,13 +175,17 @@ class AuthService {
         }
       },
       (error: any) => {
-        console.error('Firebase Auth Listener error:', { code: error?.code, message: error?.message });
-        const friendly = getFriendlyAuthErrorMessage(error);
+        console.error("Authentication failure", {
+          code: error?.code,
+          message: error?.message,
+          context: "popup"
+        });
+        // A signed-out user is normal; do not show error on initial load
         this.updateState({
-          status: 'signed-out', // Keep signed-out status so user can interact with login UI
+          status: 'signed-out',
           user: null,
-          error: friendly,
-          errorCode: error?.code || 'auth/unknown',
+          error: null,
+          errorCode: null,
         });
       }
     );

@@ -1,16 +1,13 @@
 import { firebaseConfig } from './firebase/config';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-
-const EXPECTED_EXTENSION_ID = "fhphlopkmeipmabplekkeepjakikijke";
+import { getCurrentExtensionOrigin } from './utils/extensionUtils';
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
-  if (chrome.runtime.id !== EXPECTED_EXTENSION_ID) {
-    console.warn("Extension ID mismatch:", {
-      current: chrome.runtime.id,
-      expected: EXPECTED_EXTENSION_ID
-    });
-  }
+  console.warn(
+    "Confirm this origin is registered in Firebase Authorized Domains:",
+    getCurrentExtensionOrigin()
+  );
 }
 
 console.info("[Auth Debug] Firebase project:", firebaseConfig.projectId);

@@ -1,16 +1,11 @@
 import { firebaseConfig } from '../firebase/config';
-
-const EXPECTED_EXTENSION_ID = "fhphlopkmeipmabplekkeepjakikijke";
+import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
-  if (chrome.runtime.id !== EXPECTED_EXTENSION_ID) {
-    console.warn("Extension ID mismatch:", {
-      current: chrome.runtime.id,
-      expected: EXPECTED_EXTENSION_ID
-    });
-  } else {
-    console.info("Euclid Smart Clipper extension ID verified:", chrome.runtime.id);
-  }
+  console.info(
+    "Euclid Smart Clipper extension origin:",
+    getCurrentExtensionOrigin()
+  );
 }
 
 export async function initiateGoogleSignIn(): Promise<any> {

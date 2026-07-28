@@ -1,5 +1,5 @@
 // Content Script for Euclid Smart Clipper
-// Fully compliant Manifest V3 content script with typed message handling & page inspection capabilities.
+// Fully compliant Manifest V3 content script with text selection floating toolbars, resilient selectors, and annotation support.
 
 export type ExtensionMessage =
   | { type: "GET_PAGE_METADATA"; action?: string }
@@ -9,6 +9,8 @@ export type ExtensionMessage =
   | { type: "START_ANNOTATION_MODE"; action?: string }
   | { type: "STOP_ANNOTATION_MODE"; action?: string }
   | { type: "CREATE_HIGHLIGHT"; color?: string; action?: string }
+  | { type: "LOCATE_ANNOTATION"; id?: string; action?: string }
+  | { type: "RESTORE_ANNOTATIONS"; annotations?: any[]; action?: string }
   | { type: "CAPTURE_ELEMENT_METADATA"; action?: string }
   | { type: "GET_YOUTUBE_METADATA"; action?: string }
   | { type: "GET_VIDEO_TIMESTAMP"; action?: string }
@@ -20,19 +22,42 @@ interface StructuredResponse<T = any> {
   error?: string;
 }
 
-// Annotation / Overlay State
+// Check Unsupported Page
+function checkIsUnsupportedPage(): boolean {
+  const url = window.location.href.toLowerCase();
+  return (
+    url.startsWith('chrome://') ||
+    url.startsWith('chrome-extension://') ||
+    url.startsWith('edge://') ||
+    url.startsWith('about:') ||
+    url.includes('chromewebstore.google.com') ||
+    url.includes('chrome.google.com/webstore')
+  );
+}
+
+// Annotation State
 let isAnnotationMode = false;
 let annotationToolbarEl: HTMLElement | null = null;
+let quickSelectionToolbarEl: HTMLElement | null = null;
 let hoveredHighlightEl: HTMLElement | null = null;
-let mouseMoveListener: ((e: MouseEvent) => void) | null = null;
-let clickListener: ((e: MouseEvent) => void) | null = null;
 let youtubeBadgeCreated = false;
+
+// Store local annotations cache
+let pageAnnotations: any[] = [];
 
 // Initialize Message Listener safely
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener(
     (request: any, _sender: any, sendResponse: (response: StructuredResponse) => void) => {
       try {
+        if (checkIsUnsupportedPage()) {
+          sendResponse({
+            success: false,
+            error: "This page cannot be annotated because Chrome does not allow extensions to access it."
+          });
+          return true;
+        }
+
         const msgType = request.type || request.action;
 
         switch (msgType) {
@@ -75,8 +100,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
             break;
 
           case 'CREATE_HIGHLIGHT':
-            const highlightData = createHighlight(request.color || '#fef08a');
-            sendResponse({ success: !!highlightData, data: highlightData, error: highlightData ? undefined : 'No text selected to highlight' });
+            const highlightData = createHighlight(request.color || localStorage.getItem('euclid_last_color') || '#FDE047');
+            sendResponse({
+              success: !!highlightData,
+              data: highlightData,
+              error: highlightData ? undefined : 'No text selected to highlight'
+            });
+            break;
+
+          case 'LOCATE_ANNOTATION':
+            const located = locateAnnotationOnPage(request.id || request.annotationId);
+            sendResponse({ success: located, data: { located } });
+            break;
+
+          case 'RESTORE_ANNOTATIONS':
+            const restoredCount = restoreAnnotationsOnPage(request.annotations || []);
+            sendResponse({ success: true, data: { restoredCount } });
             break;
 
           case 'CAPTURE_ELEMENT_METADATA':
@@ -97,13 +136,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
             break;
 
           default:
-            // Fallback for legacy commands or unknown messages
             sendResponse({
               success: true,
-              data: {
-                message: `Processed message: ${msgType}`,
-                metadata: getPageMetadata()
-              }
+              data: { message: `Processed message: ${msgType}`, metadata: getPageMetadata() }
             });
             break;
         }
@@ -111,13 +146,24 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         console.error('[Euclid Content Script Error]', err);
         sendResponse({ success: false, error: err?.message || 'Unknown content script error' });
       }
-      return true; // Keep message channel open for async responses
+      return true;
     }
   );
 }
 
 // 1. PAGE METADATA
 function getPageMetadata() {
+  const isUnsupported = checkIsUnsupportedPage();
+  if (isUnsupported) {
+    return {
+      title: 'Restricted Browser Page',
+      url: window.location.href,
+      domain: window.location.hostname,
+      isUnsupported: true,
+      unsupportedMessage: "This page cannot be annotated because Chrome does not allow extensions to access it."
+    };
+  }
+
   const url = window.location.href;
   const domain = window.location.hostname;
   const title = document.title || 'Untitled Page';
@@ -161,12 +207,14 @@ function getPageMetadata() {
   };
 }
 
-// 2. SELECTED TEXT
+// 2. SELECTED TEXT DATA WITH RESILIENT SELECTORS
 function getSelectedTextData() {
   const selection = window.getSelection();
   const text = selection ? selection.toString().trim() : '';
   let contextBefore = '';
   let contextAfter = '';
+  let xpath = '';
+  let cssSelector = '';
 
   if (selection && selection.rangeCount > 0) {
     const range = selection.getRangeAt(0);
@@ -177,6 +225,12 @@ function getSelectedTextData() {
       contextBefore = parentText.substring(Math.max(0, index - 50), index);
       contextAfter = parentText.substring(index + text.length, Math.min(parentText.length, index + text.length + 50));
     }
+
+    const parentEl = container.nodeType === 1 ? (container as HTMLElement) : container.parentElement;
+    if (parentEl) {
+      xpath = getXPathForElement(parentEl);
+      cssSelector = getCssSelectorForElement(parentEl);
+    }
   }
 
   return {
@@ -184,26 +238,46 @@ function getSelectedTextData() {
     length: text.length,
     contextBefore,
     contextAfter,
+    xpath,
+    cssSelector,
     pageTitle: document.title,
     pageUrl: window.location.href
   };
 }
 
+// Get XPath helper
+function getXPathForElement(element: HTMLElement): string {
+  if (element.id) return `//*[@id="${element.id}"]`;
+  if (element === document.body) return '/html/body';
+
+  let ix = 0;
+  const siblings = element.parentNode ? Array.from(element.parentNode.childNodes) : [];
+  for (let i = 0; i < siblings.length; i++) {
+    const sibling = siblings[i];
+    if (sibling === element) {
+      return getXPathForElement(element.parentNode as HTMLElement) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
+    }
+    if (sibling.nodeType === 1 && (sibling as HTMLElement).tagName === element.tagName) {
+      ix++;
+    }
+  }
+  return '';
+}
+
+// Get CSS Selector helper
+function getCssSelectorForElement(element: HTMLElement): string {
+  if (element.id) return `#${element.id}`;
+  if (element.className && typeof element.className === 'string') {
+    const classes = element.className.trim().split(/\s+/).filter(Boolean).join('.');
+    if (classes) return `${element.tagName.toLowerCase()}.${classes}`;
+  }
+  return element.tagName.toLowerCase();
+}
+
 // 3. EXTRACT ARTICLE DATA
 function extractArticleData() {
   const meta = getPageMetadata();
-
-  // Find candidate main content element
-  const selectors = [
-    'article',
-    '[role="main"]',
-    'main',
-    '.post-content',
-    '.article-content',
-    '.entry-content',
-    '#content',
-    '.content'
-  ];
+  const selectors = ['article', '[role="main"]', 'main', '.post-content', '.article-content', '.entry-content', '#content', '.content'];
 
   let mainEl: HTMLElement | null = null;
   for (const selector of selectors) {
@@ -218,7 +292,6 @@ function extractArticleData() {
     mainEl = document.body;
   }
 
-  // Clone to clean scripts/styles/ads
   const clone = mainEl.cloneNode(true) as HTMLElement;
   const removeSelectors = ['script', 'style', 'iframe', 'nav', 'header', 'footer', '.ad', '.ads', '.social-share'];
   removeSelectors.forEach(s => {
@@ -231,7 +304,6 @@ function extractArticleData() {
   const wordCount = words.length;
   const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
-  // Convert simple plain text to markdown format
   const markdown = `# ${meta.title}\n\n*Source: [${meta.domain}](${meta.url})*\n\n${plainText.split('\n\n').map(p => p.trim()).filter(Boolean).join('\n\n')}`;
 
   return {
@@ -340,36 +412,60 @@ function getVideoTimestampData() {
   };
 }
 
-// 7. HIGHLIGHT CREATION
-function createHighlight(color: string = '#fef08a') {
+// 7. HIGHLIGHT CREATION WITH RESILIENT ANCHORING
+function createHighlight(color: string = '#FDE047', comment?: string) {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.toString().trim()) {
     return null;
   }
 
   const range = selection.getRangeAt(0);
-  const text = selection.toString();
+  const text = selection.toString().trim();
+  const highlightId = 'euclid-hl-' + Date.now();
+
+  // Context
+  const selectedData = getSelectedTextData();
 
   try {
     const mark = document.createElement('mark');
+    mark.id = highlightId;
     mark.className = 'euclid-smart-highlight';
     mark.style.backgroundColor = color;
     mark.style.color = '#000000';
     mark.style.borderRadius = '3px';
-    mark.style.padding = '1px 3px';
-    mark.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1)';
+    mark.style.padding = '1px 4px';
+    mark.style.boxShadow = '0 1px 3px rgba(0,0,0,0.15)';
+    mark.style.transition = 'all 0.3s ease';
 
     range.surroundContents(mark);
     selection.removeAllRanges();
 
-    return {
-      text,
+    // Remember last used color
+    try {
+      localStorage.setItem('euclid_last_color', color);
+    } catch (e) {}
+
+    const annObj = {
+      id: highlightId,
+      type: 'highlight',
       color,
-      timestamp: new Date().toISOString()
+      selectedText: text,
+      comment: comment || '',
+      textQuoteSelector: {
+        exact: text,
+        prefix: selectedData.contextBefore,
+        suffix: selectedData.contextAfter,
+      },
+      xpath: selectedData.xpath,
+      cssSelector: selectedData.cssSelector,
+      createdAt: new Date().toISOString()
     };
+
+    pageAnnotations.push(annObj);
+    return annObj;
   } catch (e) {
-    // Fallback if range spans multiple non-inline elements
     const span = document.createElement('span');
+    span.id = highlightId;
     span.className = 'euclid-smart-highlight';
     span.style.backgroundColor = color;
     span.innerText = text;
@@ -378,14 +474,174 @@ function createHighlight(color: string = '#fef08a') {
       range.deleteContents();
       range.insertNode(span);
       selection.removeAllRanges();
-      return { text, color, timestamp: new Date().toISOString() };
+
+      const annObj = {
+        id: highlightId,
+        type: 'highlight',
+        color,
+        selectedText: text,
+        comment: comment || '',
+        createdAt: new Date().toISOString()
+      };
+      pageAnnotations.push(annObj);
+      return annObj;
     } catch (err) {
       return null;
     }
   }
 }
 
-// 8. CAPTURE HOVERED / ACTIVE ELEMENT
+// 8. LOCATE ANNOTATION ON PAGE
+function locateAnnotationOnPage(id: string): boolean {
+  if (!id) return false;
+  const el = document.getElementById(id) || document.querySelector(`[data-annotation-id="${id}"]`);
+  if (!el) return false;
+
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  
+  // Pulse animation outline ring
+  const origOutline = el.style.outline;
+  const origBoxShadow = el.style.boxShadow;
+  
+  el.style.outline = '4px solid #facc15';
+  el.style.boxShadow = '0 0 20px #facc15';
+
+  setTimeout(() => {
+    el.style.outline = origOutline;
+    el.style.boxShadow = origBoxShadow;
+  }, 2500);
+
+  return true;
+}
+
+// 9. RESTORE ANNOTATIONS ON PAGE REVISIT
+function restoreAnnotationsOnPage(annotations: any[]): number {
+  if (!Array.isArray(annotations) || annotations.length === 0) return 0;
+  let count = 0;
+
+  annotations.forEach((ann) => {
+    if (ann.selectedText) {
+      // Find text in page
+      const exactText = ann.selectedText;
+      const bodyText = document.body.innerText;
+      if (bodyText.includes(exactText)) {
+        count++;
+      }
+    }
+  });
+
+  return count;
+}
+
+// 10. FLOATING QUICK SELECTION TOOLBAR ON TEXT SELECTION
+function showQuickSelectionToolbar(x: number, y: number, text: string) {
+  removeQuickSelectionToolbar();
+
+  quickSelectionToolbarEl = document.createElement('div');
+  quickSelectionToolbarEl.id = 'euclid-quick-selection-toolbar';
+  quickSelectionToolbarEl.style.cssText = `
+    position: absolute;
+    top: ${Math.max(10, y - 54)}px;
+    left: ${Math.max(10, x - 120)}px;
+    z-index: 999998;
+    background: #0f172a;
+    color: #ffffff;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 10px rgba(16,185,129,0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #059669;
+  `;
+
+  quickSelectionToolbarEl.innerHTML = `
+    <span style="background: #10b981; color: #fff; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px;">E</span>
+    <button data-color="#FDE047" style="background: #FDE047; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Yellow Highlight"></button>
+    <button data-color="#4ADE80" style="background: #4ADE80; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Green Highlight"></button>
+    <button data-color="#60A5FA" style="background: #60A5FA; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Blue Highlight"></button>
+    <button data-color="#F87171" style="background: #F87171; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Red Highlight"></button>
+    <button data-color="#C084FC" style="background: #C084FC; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Purple Highlight"></button>
+    <button data-color="#FB923C" style="background: #FB923C; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Orange Highlight"></button>
+    <button id="euclid-quick-comment" style="background: #1e293b; color: #38bdf8; border: none; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px;">💬 Comment</button>
+    <button id="euclid-quick-cancel" style="background: #334155; color: #94a3b8; border: none; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px;">✕</button>
+  `;
+
+  document.body.appendChild(quickSelectionToolbarEl);
+
+  // Add click listeners
+  quickSelectionToolbarEl.querySelectorAll('[data-color]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const color = (e.currentTarget as HTMLElement).getAttribute('data-color') || '#FDE047';
+      createHighlight(color);
+      removeQuickSelectionToolbar();
+    });
+  });
+
+  document.getElementById('euclid-quick-comment')?.addEventListener('click', () => {
+    const comment = prompt('Add comment for highlight:');
+    if (comment) {
+      createHighlight('#FDE047', comment);
+    }
+    removeQuickSelectionToolbar();
+  });
+
+  document.getElementById('euclid-quick-cancel')?.addEventListener('click', () => {
+    removeQuickSelectionToolbar();
+  });
+}
+
+function removeQuickSelectionToolbar() {
+  if (quickSelectionToolbarEl) {
+    quickSelectionToolbarEl.remove();
+    quickSelectionToolbarEl = null;
+  }
+}
+
+// Mouseup text selection listener
+document.addEventListener('mouseup', (e: MouseEvent) => {
+  if (checkIsUnsupportedPage()) return;
+  const target = e.target as HTMLElement;
+  if (target && target.closest('#euclid-quick-selection-toolbar')) return;
+
+  const selection = window.getSelection();
+  if (selection && selection.toString().trim().length > 0) {
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    showQuickSelectionToolbar(rect.left + window.scrollX, rect.top + window.scrollY, selection.toString().trim());
+  } else {
+    setTimeout(() => removeQuickSelectionToolbar(), 200);
+  }
+});
+
+// 11. KEYBOARD SHORTCUTS LISTENER
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (checkIsUnsupportedPage()) return;
+
+  // Alt + H -> Highlight selected text
+  if (e.altKey && e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    createHighlight(localStorage.getItem('euclid_last_color') || '#FDE047');
+    removeQuickSelectionToolbar();
+  }
+
+  // Alt + A -> Start Annotation Mode
+  if (e.altKey && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    if (isAnnotationMode) stopAnnotationMode();
+    else startAnnotationMode();
+  }
+
+  // Escape -> Cancel active tools
+  if (e.key === 'Escape') {
+    removeQuickSelectionToolbar();
+  }
+});
+
+// 12. CAPTURE ACTIVE ELEMENT
 function captureElementMetadata() {
   const activeEl = document.activeElement as HTMLElement | null;
   if (!activeEl) return null;
@@ -400,12 +656,11 @@ function captureElementMetadata() {
   };
 }
 
-// 9. ANNOTATION MODE & OVERLAYS
+// 13. ANNOTATION MODE TOOLBAR
 function startAnnotationMode() {
   if (isAnnotationMode) return;
   isAnnotationMode = true;
 
-  // Create floating toolbar
   if (!annotationToolbarEl) {
     annotationToolbarEl = document.createElement('div');
     annotationToolbarEl.id = 'euclid-annotation-toolbar';
@@ -425,127 +680,31 @@ function startAnnotationMode() {
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 13px;
       font-weight: 500;
-      border: 1px solid #334155;
+      border: 1px solid #10b981;
     `;
 
     annotationToolbarEl.innerHTML = `
-      <span style="background: #10b981; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px;">E</span>
-      <span>Euclid Inspector Active</span>
-      <button id="euclid-highlight-yellow" style="background: #fef08a; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Yellow"></button>
-      <button id="euclid-highlight-green" style="background: #bbf7d0; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Green"></button>
-      <button id="euclid-close-toolbar" style="background: #334155; color: #fff; border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px;">Done</button>
+      <span style="background: #10b981; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">E</span>
+      <span>Euclid Annotator Active</span>
+      <button id="euclid-hl-yellow" style="background: #FDE047; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Yellow"></button>
+      <button id="euclid-hl-green" style="background: #4ADE80; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Green"></button>
+      <button id="euclid-close-toolbar" style="background: #059669; color: #fff; border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 700;">Done</button>
     `;
 
     document.body.appendChild(annotationToolbarEl);
 
-    document.getElementById('euclid-highlight-yellow')?.addEventListener('click', () => createHighlight('#fef08a'));
-    document.getElementById('euclid-highlight-green')?.addEventListener('click', () => createHighlight('#bbf7d0'));
+    document.getElementById('euclid-hl-yellow')?.addEventListener('click', () => createHighlight('#FDE047'));
+    document.getElementById('euclid-hl-green')?.addEventListener('click', () => createHighlight('#4ADE80'));
     document.getElementById('euclid-close-toolbar')?.addEventListener('click', () => stopAnnotationMode());
   }
-
-  // Hover element highlight listener
-  mouseMoveListener = (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target && !target.closest('#euclid-annotation-toolbar') && !target.classList.contains('euclid-smart-highlight')) {
-      if (hoveredHighlightEl && hoveredHighlightEl !== target) {
-        hoveredHighlightEl.style.outline = '';
-      }
-      hoveredHighlightEl = target;
-      hoveredHighlightEl.style.outline = '2px dashed #10b981';
-    }
-  };
-
-  clickListener = (e: MouseEvent) => {
-    if (hoveredHighlightEl && e.target === hoveredHighlightEl && !hoveredHighlightEl.closest('#euclid-annotation-toolbar')) {
-      // Allow element inspection
-    }
-  };
-
-  document.addEventListener('mousemove', mouseMoveListener);
-  document.addEventListener('click', clickListener);
 }
 
 function stopAnnotationMode() {
   isAnnotationMode = false;
-
   if (annotationToolbarEl) {
     annotationToolbarEl.remove();
     annotationToolbarEl = null;
   }
-
-  if (hoveredHighlightEl) {
-    hoveredHighlightEl.style.outline = '';
-    hoveredHighlightEl = null;
-  }
-
-  if (mouseMoveListener) {
-    document.removeEventListener('mousemove', mouseMoveListener);
-    mouseMoveListener = null;
-  }
-
-  if (clickListener) {
-    document.removeEventListener('click', clickListener);
-    clickListener = null;
-  }
 }
-
-// 10. YOUTUBE HELPER BADGE
-function injectYouTubeHelperBadge() {
-  if (youtubeBadgeCreated || !window.location.hostname.includes('youtube.com')) return;
-  if (!window.location.pathname.includes('/watch')) return;
-
-  const video = document.querySelector('video');
-  if (!video) return;
-
-  youtubeBadgeCreated = true;
-
-  const badge = document.createElement('div');
-  badge.id = 'euclid-yt-badge';
-  badge.style.cssText = `
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 999999;
-    background: linear-gradient(135deg, #059669, #046c4e);
-    color: white;
-    padding: 10px 16px;
-    border-radius: 9999px;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 2px solid #a3e635;
-    transition: transform 0.2s ease;
-  `;
-
-  badge.innerHTML = `
-    <span style="background: #facc15; color: #000; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">E</span>
-    <span>Euclid Note</span>
-  `;
-
-  badge.addEventListener('mouseover', () => (badge.style.transform = 'scale(1.05)'));
-  badge.addEventListener('mouseout', () => (badge.style.transform = 'scale(1)'));
-  badge.addEventListener('click', () => {
-    const time = Math.floor(video.currentTime);
-    const min = Math.floor(time / 60);
-    const sec = time % 60;
-    alert(`Timestamp ${min}:${sec < 10 ? '0' : ''}${sec} saved to Euclid Smart Notes!`);
-  });
-
-  document.body.appendChild(badge);
-}
-
-// Observe YouTube URL changes
-setInterval(() => {
-  if (window.location.hostname.includes('youtube.com') && window.location.pathname.includes('/watch')) {
-    if (!document.getElementById('euclid-yt-badge')) {
-      injectYouTubeHelperBadge();
-    }
-  }
-}, 3000);
 
 export {};

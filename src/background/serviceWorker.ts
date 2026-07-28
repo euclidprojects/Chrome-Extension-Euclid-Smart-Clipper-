@@ -7,13 +7,10 @@ import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-exte
 import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
-console.info(
-  "[Google Auth] Background service worker loaded",
-  {
-    extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
-    timestamp: new Date().toISOString()
-  }
-);
+console.info("[Service Worker] Loaded", {
+  extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
+  time: new Date().toISOString()
+});
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
   console.warn(
@@ -167,9 +164,24 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
 
   // Background Message Listener
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'PING_SERVICE_WORKER') {
-      sendResponse({ success: true, data: { status: 'service_worker_active' } });
-      return true;
+    console.info("[Service Worker] Message received", {
+      type: request?.type,
+      target: request?.target,
+      senderId: sender?.id
+    });
+
+    if (
+      request?.type === 'SERVICE_WORKER_PING' ||
+      request?.type === 'PING_SERVICE_WORKER' ||
+      request?.type === AuthMessages.SERVICE_WORKER_PING
+    ) {
+      sendResponse({
+        success: true,
+        message: 'SERVICE_WORKER_PONG',
+        extensionId: chrome.runtime.id,
+        data: { status: 'service_worker_active' }
+      });
+      return false;
     }
 
     if (
@@ -178,17 +190,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       request?.type === 'EUCLID_GOOGLE_SIGN_IN' ||
       request?.type === 'GOOGLE_SIGN_IN_REQUEST'
     ) {
-      console.info("[Google Auth] Service worker received message:", {
-        type: request?.type,
-        target: request?.target,
-        senderId: sender?.id
-      });
       console.info("[Google Auth] 2. Service worker received request");
 
       handleGoogleSignInOffscreen()
-        .then((res) => sendResponse(res))
+        .then((res) => {
+          if (res?.success) {
+            sendResponse({
+              success: true,
+              result: res,
+              user: res.user
+            });
+          } else {
+            sendResponse(res);
+          }
+        })
         .catch((err) => {
-          console.error("[Google Auth] Service worker failure:", {
+          console.error("[Google Auth] Service-worker error", {
             code: err?.code,
             message: err?.message,
             stack: err?.stack
@@ -196,8 +213,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
           sendResponse({
             success: false,
             error: {
-              code: err?.code || 'auth/service-worker-failed',
-              message: err?.message || 'Google Sign-In returned invalid authentication data. Please try again.'
+              code: err?.code || 'auth/service-worker-error',
+              message: err?.message || 'Google Sign-In could not be completed.'
             }
           });
         });

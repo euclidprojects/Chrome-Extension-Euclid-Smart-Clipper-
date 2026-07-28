@@ -5,6 +5,13 @@ export type ClipType =
   | 'simplified_article'
   | 'full_page';
 
+export type ScreenshotMode =
+  | 'visible_area'
+  | 'selected_area'
+  | 'full_page'
+  | 'element'
+  | 'video_frame';
+
 export type CaptureJobType =
   | 'visible_page'
   | 'selected_area'

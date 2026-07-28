@@ -1,3 +1,4 @@
+/// <reference types="chrome"/>
 // Background Service Worker for Euclid Smart Clipper
 
 // Context Menu & Lifecycle Initialization
@@ -103,6 +104,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'PING_SERVICE_WORKER') {
       sendResponse({ success: true, data: { status: 'service_worker_active' } });
+      return true;
+    }
+
+    if (request.type === 'START_SCREENSHOT_CAPTURE') {
+      handleStartScreenshotCapture(request.payload)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : 'Screenshot capture failed.',
+          })
+        );
       return true;
     }
 
@@ -227,6 +240,252 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return true;
     }
   });
+}
+
+async function handleStartScreenshotCapture(payload: {
+  jobId: string;
+  mode: string;
+  tabId: number;
+  sourceUrl: string;
+  sourceTitle: string;
+}): Promise<{ success: boolean; jobId?: string; error?: string }> {
+  const { jobId, mode, tabId, sourceUrl, sourceTitle } = payload;
+
+  if (!tabId) {
+    return { success: false, error: 'The active tab could not be detected.' };
+  }
+
+  let tab: any;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (e) {
+    return { success: false, error: 'The active tab could not be detected.' };
+  }
+
+  const url = tab.url || sourceUrl || '';
+  if (
+    url.startsWith('chrome://') ||
+    url.startsWith('chrome-extension://') ||
+    url.startsWith('edge://') ||
+    url.startsWith('about:') ||
+    url.includes('chromewebstore.google.com') ||
+    url.includes('chrome.google.com/webstore')
+  ) {
+    return { success: false, error: 'This page cannot be captured because Chrome restricts extension access.' };
+  }
+
+  const ensureContentScript = async (): Promise<boolean> => {
+    try {
+      const pong = await new Promise((res) => {
+        chrome.tabs.sendMessage(tabId, { type: 'PING_CONTENT_SCRIPT' }, (response) => {
+          if (chrome.runtime.lastError || !response?.success) {
+            res(false);
+          } else {
+            res(true);
+          }
+        });
+      });
+      if (pong) return true;
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['contentScript.js'],
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  if (mode === 'visible_area') {
+    return new Promise((resolve) => {
+      chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          resolve({
+            success: false,
+            error: chrome.runtime.lastError?.message || 'Failed to capture visible area.',
+          });
+          return;
+        }
+
+        const jobData = {
+          id: jobId,
+          type: 'visible_page',
+          tabId,
+          sourceUrl: url,
+          sourceTitle: tab.title || sourceTitle || 'Visible Webpage',
+          createdAt: Date.now(),
+          status: 'editing',
+          dataUrl,
+        };
+
+        try {
+          if (chrome.storage?.session) {
+            await chrome.storage.session.set({ [jobId]: jobData });
+          }
+          await chrome.storage?.local.set({ [jobId]: jobData });
+        } catch (e) {
+          console.warn('Storage save warning:', e);
+        }
+
+        const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+        chrome.windows.create({
+          url: editorUrl,
+          type: 'popup',
+          width: 1100,
+          height: 750,
+          focused: true,
+        });
+
+        resolve({ success: true, jobId });
+      });
+    });
+  }
+
+  if (mode === 'selected_area') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
+      return { success: false, error: 'Selected Area could not start because the content script is unavailable.' };
+    }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'START_REGION_SELECTION' }, (response) => {
+        if (chrome.runtime.lastError || (response && !response.success)) {
+          resolve({
+            success: false,
+            error: response?.error || 'Selected Area could not start because the content script is unavailable.',
+          });
+        } else {
+          resolve({ success: true, jobId });
+        }
+      });
+    });
+  }
+
+  if (mode === 'element') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
+      return { success: false, error: 'Element selection could not start because the content script is unavailable.' };
+    }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'START_ELEMENT_SELECTION' }, (response) => {
+        if (chrome.runtime.lastError || (response && !response.success)) {
+          resolve({
+            success: false,
+            error: response?.error || 'Element selection could not start.',
+          });
+        } else {
+          resolve({ success: true, jobId });
+        }
+      });
+    });
+  }
+
+  if (mode === 'video_frame') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
+      return { success: false, error: 'No supported video was detected.' };
+    }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_TIMESTAMP' }, async (response) => {
+        if (chrome.runtime.lastError || !response || !response.success || !response.data) {
+          resolve({ success: false, error: 'No supported video was detected.' });
+          return;
+        }
+
+        const videoData = response.data;
+        chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
+          const finalDataUrl = videoData.frameDataUrl || dataUrl;
+          if (!finalDataUrl) {
+            resolve({ success: false, error: 'Failed to capture video frame.' });
+            return;
+          }
+
+          const jobData = {
+            id: jobId,
+            type: 'video_frame',
+            tabId,
+            sourceUrl: url,
+            sourceTitle: videoData.videoTitle || tab.title || sourceTitle,
+            createdAt: Date.now(),
+            status: 'editing',
+            dataUrl: finalDataUrl,
+            videoTimestamp: videoData.currentTime,
+            formattedVideoTime: videoData.formattedTime,
+          };
+
+          try {
+            if (chrome.storage?.session) {
+              await chrome.storage.session.set({ [jobId]: jobData });
+            }
+            await chrome.storage?.local.set({ [jobId]: jobData });
+          } catch (e) {
+            console.warn('Storage save warning:', e);
+          }
+
+          const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+          chrome.windows.create({
+            url: editorUrl,
+            type: 'popup',
+            width: 1100,
+            height: 750,
+            focused: true,
+          });
+
+          resolve({ success: true, jobId });
+        });
+      });
+    });
+  }
+
+  if (mode === 'full_page') {
+    return new Promise((resolve) => {
+      chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          resolve({
+            success: false,
+            error: chrome.runtime.lastError?.message || 'Failed to capture full page.',
+          });
+          return;
+        }
+
+        const jobData = {
+          id: jobId,
+          type: 'full_page',
+          tabId,
+          sourceUrl: url,
+          sourceTitle: tab.title || sourceTitle || 'Full Page Capture',
+          createdAt: Date.now(),
+          status: 'editing',
+          dataUrl,
+        };
+
+        try {
+          if (chrome.storage?.session) {
+            await chrome.storage.session.set({ [jobId]: jobData });
+          }
+          await chrome.storage?.local.set({ [jobId]: jobData });
+        } catch (e) {
+          console.warn('Storage save warning:', e);
+        }
+
+        const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+        chrome.windows.create({
+          url: editorUrl,
+          type: 'popup',
+          width: 1100,
+          height: 750,
+          focused: true,
+        });
+
+        resolve({ success: true, jobId });
+      });
+    });
+  }
+
+  return { success: false, error: 'Unknown screenshot mode.' };
 }
 
 export {};

@@ -7,6 +7,11 @@ import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-exte
 import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
+console.info("[Service Worker] Euclid Smart Clipper worker loaded", {
+  extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
+  timestamp: new Date().toISOString()
+});
+
 console.info("[Service Worker] Loaded", {
   extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
   time: new Date().toISOString()

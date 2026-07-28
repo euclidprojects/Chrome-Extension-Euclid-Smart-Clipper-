@@ -13,11 +13,43 @@ export const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-N5HJ2EXRN1"
 };
 
-// Singleton Firebase initialization
-export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// Singleton Firebase initialization safely guarded against background worker top-level crashes
+let app: any = null;
+try {
+  app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+} catch (e) {
+  console.warn("[Firebase] initializeApp error:", e);
+}
+export const firebaseApp = app;
 
-export const auth = getAuth(firebaseApp);
-export const firestore = getFirestore(firebaseApp);
-export const firebaseStorage = getStorage(firebaseApp);
+let authInstance: any = null;
+try {
+  if (app) {
+    authInstance = getAuth(app);
+  }
+} catch (e) {
+  console.warn("[Firebase] getAuth error:", e);
+}
+export const auth = authInstance;
+
+let firestoreInstance: any = null;
+try {
+  if (app) {
+    firestoreInstance = getFirestore(app);
+  }
+} catch (e) {
+  console.warn("[Firebase] getFirestore error:", e);
+}
+export const firestore = firestoreInstance;
+
+let storageInstance: any = null;
+try {
+  if (app) {
+    storageInstance = getStorage(app);
+  }
+} catch (e) {
+  console.warn("[Firebase] getStorage error:", e);
+}
+export const firebaseStorage = storageInstance;
 
 export default firebaseApp;

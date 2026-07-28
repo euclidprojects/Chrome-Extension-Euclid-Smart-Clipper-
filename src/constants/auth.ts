@@ -1,0 +1,4 @@
+export const AuthMessages = {
+  START_GOOGLE_SIGN_IN: 'START_GOOGLE_SIGN_IN',
+  OFFSCREEN_GOOGLE_SIGN_IN: 'OFFSCREEN_GOOGLE_SIGN_IN',
+} as const;

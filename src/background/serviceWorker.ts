@@ -5,6 +5,15 @@ import { isSupportedPage } from '../utils/pageUtils';
 import { auth, firebaseConfig } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-extension';
 import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
+import { AuthMessages } from '../constants/auth';
+
+console.info(
+  "[Google Auth] Background service worker loaded",
+  {
+    extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
+    timestamp: new Date().toISOString()
+  }
+);
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
   console.warn(
@@ -163,13 +172,35 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return true;
     }
 
-    if (request.type === 'EUCLID_GOOGLE_SIGN_IN' || request.type === 'GOOGLE_SIGN_IN_REQUEST') {
+    if (
+      request?.type === AuthMessages.START_GOOGLE_SIGN_IN ||
+      request?.type === 'START_GOOGLE_SIGN_IN' ||
+      request?.type === 'EUCLID_GOOGLE_SIGN_IN' ||
+      request?.type === 'GOOGLE_SIGN_IN_REQUEST'
+    ) {
+      console.info("[Google Auth] Service worker received message:", {
+        type: request?.type,
+        target: request?.target,
+        senderId: sender?.id
+      });
+      console.info("[Google Auth] 2. Service worker received request");
+
       handleGoogleSignInOffscreen()
         .then((res) => sendResponse(res))
-        .catch((err) => sendResponse({
-          success: false,
-          error: err?.message || 'Google Sign-In returned invalid authentication data. Please try again.'
-        }));
+        .catch((err) => {
+          console.error("[Google Auth] Service worker failure:", {
+            code: err?.code,
+            message: err?.message,
+            stack: err?.stack
+          });
+          sendResponse({
+            success: false,
+            error: {
+              code: err?.code || 'auth/service-worker-failed',
+              message: err?.message || 'Google Sign-In returned invalid authentication data. Please try again.'
+            }
+          });
+        });
       return true;
     }
 
@@ -561,7 +592,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   }
 
   async function setupOffscreenDocument(): Promise<void> {
-    console.info("[Google Auth] 3. Creating/checking offscreen document");
+    console.info("[Google Auth] 3. Preparing offscreen document");
     if (await hasOffscreenDocument()) {
       console.info("[Google Auth] 4. Offscreen document ready");
       return;
@@ -604,8 +635,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   }
 
   async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
-    console.info("[Google Auth] 2. Service worker received request");
-
     if (!chrome.offscreen) {
       return { success: false, error: 'Offscreen API not supported' };
     }
@@ -613,11 +642,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     try {
       await setupOffscreenDocument();
 
-      console.info("[Google Auth] 5. Message sent to offscreen document");
+      console.info("[Google Auth] 5. Sending request to offscreen document");
 
       const response = await Promise.race([
         new Promise<OffscreenGoogleAuthResponse | null>((resolve) => {
-          chrome.runtime.sendMessage({ type: 'EUCLID_GOOGLE_SIGN_IN', target: 'offscreen' }, (res) => {
+          chrome.runtime.sendMessage({ type: AuthMessages.OFFSCREEN_GOOGLE_SIGN_IN, target: 'offscreen' }, (res) => {
             if (chrome.runtime.lastError) {
               console.error("[Google Auth] Offscreen runtime error:", chrome.runtime.lastError.message);
               resolve({

@@ -2,6 +2,7 @@ import { firebaseConfig } from './firebase/config';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getCurrentExtensionOrigin } from './utils/extensionUtils';
+import { AuthMessages } from './constants/auth';
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
   console.warn(
@@ -139,7 +140,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     if (
       !message ||
       message.target !== 'offscreen' ||
-      (message.type !== 'EUCLID_GOOGLE_SIGN_IN' && message.type !== 'START_GOOGLE_SIGN_IN')
+      (message.type !== AuthMessages.OFFSCREEN_GOOGLE_SIGN_IN &&
+       message.type !== 'OFFSCREEN_GOOGLE_SIGN_IN' &&
+       message.type !== 'EUCLID_GOOGLE_SIGN_IN')
     ) {
       return false;
     }

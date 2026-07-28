@@ -25,6 +25,7 @@ import {
   Image as ImageIcon,
   FileText,
   CheckSquare,
+  Maximize2,
 } from 'lucide-react';
 import {
   EuclidNotebook,
@@ -35,7 +36,6 @@ import {
   ClipType,
 } from '../types';
 import { clippingService } from '../services/clippingService';
-import { AnnotationPanel } from './AnnotationPanel';
 
 interface ClippingWorkspaceProps {
   notebooks: EuclidNotebook[];
@@ -68,8 +68,11 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   onOpenSidePanel,
   onOpenSettings,
 }) => {
-  // Primary selected clip option - DEFAULT: screenshot
-  const [clipFormat, setClipFormat] = useState<ClipFormatType>('screenshot');
+  // Primary selected clip option - DEFAULT: null (no option selected initially)
+  const [clipFormat, setClipFormat] = useState<ClipFormatType | null>(null);
+
+  // Modal dialog for Screenshot Mode
+  const [isScreenshotModalOpen, setIsScreenshotModalOpen] = useState(false);
 
   // Page Context & Metadata
   const [url, setUrl] = useState('https://en.wikipedia.org/wiki/Euclid');
@@ -82,7 +85,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
   // Sub-choice for Screenshot mode
   const [screenshotMode, setScreenshotMode] = useState<'visible' | 'selection' | 'full' | 'video_frame'>('visible');
-  const [showScreenshotAnnotation, setShowScreenshotAnnotation] = useState(false);
 
   // Full Page & Simplified Article Options
   const [includeImages, setIncludeImages] = useState(true);
@@ -123,6 +125,18 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Escape key listener for screenshot modal dialog
+  useEffect(() => {
+    if (!isScreenshotModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsScreenshotModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isScreenshotModalOpen]);
 
   // Sync title when page title changes unless edited
   useEffect(() => {
@@ -181,6 +195,43 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       testId: 'clip-option-full-page',
     },
   ];
+
+  // Execute screenshot capture from modal choice
+  const handleExecuteScreenshotMode = (mode: 'visible_page' | 'selected_area' | 'full_page' | 'element' | 'video_frame') => {
+    setIsScreenshotModalOpen(false);
+
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      if (mode === 'visible_page') {
+        chrome.runtime.sendMessage({
+          type: 'CAPTURE_VISIBLE_TAB',
+          data: { sourceUrl: url, sourceTitle: pageTitle },
+        });
+        window.close();
+      } else if (mode === 'selected_area') {
+        chrome.runtime.sendMessage({ type: 'START_REGION_SELECTION' }, (response) => {
+          if (chrome.runtime.lastError || (response && !response.success)) {
+            alert('This page cannot be captured because Chrome does not allow extensions to access it.');
+          }
+        });
+        window.close();
+      } else if (mode === 'element') {
+        chrome.runtime.sendMessage({ type: 'START_ELEMENT_SELECTION' }, (response) => {
+          if (chrome.runtime.lastError || (response && !response.success)) {
+            alert('This page cannot be captured because Chrome does not allow extensions to access it.');
+          }
+        });
+        window.close();
+      } else if (mode === 'full_page' || mode === 'video_frame') {
+        chrome.runtime.sendMessage({
+          type: 'CAPTURE_VISIBLE_TAB',
+          data: { sourceUrl: url, sourceTitle: pageTitle, mode },
+        });
+        window.close();
+      }
+    } else {
+      alert(`Screenshot mode triggered: ${mode}`);
+    }
+  };
 
   // Destination handlers
   const handleSelectNotebook = (id: string) => {
@@ -251,10 +302,10 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     }
 
     try {
-      let noteType: EuclidNoteType = 'web_clip';
+      let noteType: EuclidNoteType = 'bookmark';
       if (clipFormat === 'screenshot') noteType = 'screenshot';
       if (clipFormat === 'youtube_note') noteType = 'youtube';
-      if (clipFormat === 'bookmark') noteType = 'bookmark';
+      if (clipFormat === 'bookmark' || !clipFormat) noteType = 'bookmark';
       if (clipFormat === 'simplified_article') noteType = 'article';
       if (clipFormat === 'full_page') noteType = 'web_clip';
 
@@ -294,7 +345,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         sourceDomain: domainName(),
         sourceAuthor: author,
         sourceFavicon: faviconUrl,
-        clipFormat,
+        clipFormat: clipFormat || 'bookmark',
         wordCount: noteRemark.split(/\s+/).filter(Boolean).length || 10,
         readingTime: 1,
         extensionCreated: true,
@@ -337,7 +388,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const filteredFolders = folders.filter((f) => !f.notebookId || f.notebookId === selectedNotebookId);
 
   return (
-    <div className="clipper-popup flex flex-col w-full h-full bg-[#0c1319] text-slate-100 overflow-hidden select-none">
+    <div className="clipper-popup flex flex-col w-full h-full bg-[#0c1319] text-slate-100 overflow-hidden select-none relative">
       
       {/* 1. STICKY HEADER & 2. CONNECTION STATUS */}
       <header className="h-[46px] px-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-lg sticky top-0 z-30">
@@ -408,9 +459,13 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                   type="button"
                   title={fmt.description}
                   onClick={() => {
-                    setClipFormat(fmt.id);
-                    setSavedNoteId(null);
-                    setSaveError(null);
+                    if (fmt.id === 'screenshot') {
+                      setIsScreenshotModalOpen(true);
+                    } else {
+                      setClipFormat(fmt.id);
+                      setSavedNoteId(null);
+                      setSaveError(null);
+                    }
                   }}
                   className={`w-full h-[40px] px-2.5 rounded-lg border text-left flex items-center justify-between transition-all cursor-pointer ${
                     isSelected
@@ -444,94 +499,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
         {/* C. SELECTED CLIP-TYPE TOOLS & SETTINGS */}
         <div className="pt-3 space-y-3">
-          {clipFormat === 'screenshot' && (
-            <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
-                  Screenshot Mode Options
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowScreenshotAnnotation(!showScreenshotAnnotation)}
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors cursor-pointer ${
-                    showScreenshotAnnotation
-                      ? 'bg-amber-400 text-slate-950 border-amber-300'
-                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
-                  }`}
-                >
-                  {showScreenshotAnnotation ? 'Hide Tools' : 'Annotate Screenshot'}
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => setScreenshotMode('visible')}
-                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
-                    screenshotMode === 'visible' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <Camera className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Visible Page</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setScreenshotMode('selection')}
-                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
-                    screenshotMode === 'selection' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <Crop className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Selected Region</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setScreenshotMode('full')}
-                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
-                    screenshotMode === 'full' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Full Page</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setScreenshotMode('video_frame')}
-                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
-                    screenshotMode === 'video_frame' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  <Video className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Video Frame</span>
-                </button>
-              </div>
-
-              {showScreenshotAnnotation && (
-                <div className="pt-2 border-t border-slate-800">
-                  <AnnotationPanel
-                    notebooks={notebooks}
-                    folders={folders}
-                    tags={tags}
-                    existingNotes={existingNotes}
-                    onSaveNote={onSaveNote}
-                    onCreateNotebook={onCreateNotebook}
-                    onCreateFolder={onCreateFolder}
-                    onCreateTag={onCreateTag}
-                    onOpenSmartNotesNote={onOpenSmartNotesNote}
-                    isFloatingOverlay={false}
-                    pageTitle={pageTitle}
-                    pageUrl={url}
-                    hideHeaderAndSave={true}
-                    hideDestinationControls={true}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
           {clipFormat === 'youtube_note' && (
             <div className="space-y-3">
               {!isYouTubePage ? (
@@ -574,7 +541,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => alert(`Captured video frame at ${ytTimestamp}`)}
+                      onClick={() => setIsScreenshotModalOpen(true)}
                       className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
                     >
                       <Camera className="w-3 h-3 text-amber-300" />
@@ -1036,6 +1003,138 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         </div>
       </div>
 
+      {/* SCREENSHOT MODE DIALOG MODAL */}
+      {isScreenshotModalOpen && (
+        <div
+          data-testid="screenshot-mode-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="screenshot-mode-title"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150"
+        >
+          <div className="bg-[#12161f] border border-emerald-500/50 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-amber-300 flex items-center justify-center shrink-0">
+                  <Camera className="w-3.5 h-3.5" />
+                </div>
+                <h2 id="screenshot-mode-title" className="font-extrabold text-[13px] text-white tracking-tight truncate">
+                  Choose Screenshot Mode
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsScreenshotModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                aria-label="Close dialog"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Options List */}
+            <div className="p-3 space-y-2 overflow-y-auto">
+              {/* Visible Area */}
+              <button
+                type="button"
+                data-testid="screenshot-mode-visible"
+                aria-label="Capture Visible Area"
+                onClick={() => handleExecuteScreenshotMode('visible_page')}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-[#0a0d12] hover:bg-emerald-950/60 hover:border-emerald-500/60 text-left flex items-start gap-3 group transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 group-hover:text-amber-300 shrink-0">
+                  <Camera className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[12px] text-slate-100 group-hover:text-amber-300">Visible Area</div>
+                  <div className="text-[10px] text-slate-400 leading-tight mt-0.5">Capture the currently visible portion of the webpage</div>
+                </div>
+              </button>
+
+              {/* Selected Area */}
+              <button
+                type="button"
+                data-testid="screenshot-mode-selected-area"
+                aria-label="Capture Selected Area"
+                onClick={() => handleExecuteScreenshotMode('selected_area')}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-[#0a0d12] hover:bg-emerald-950/60 hover:border-emerald-500/60 text-left flex items-start gap-3 group transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 group-hover:text-amber-300 shrink-0">
+                  <Crop className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[12px] text-slate-100 group-hover:text-amber-300">Selected Area</div>
+                  <div className="text-[10px] text-slate-400 leading-tight mt-0.5">Drag to select a rectangular region to capture</div>
+                </div>
+              </button>
+
+              {/* Full Page */}
+              <button
+                type="button"
+                data-testid="screenshot-mode-full-page"
+                aria-label="Capture Full Page"
+                onClick={() => handleExecuteScreenshotMode('full_page')}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-[#0a0d12] hover:bg-emerald-950/60 hover:border-emerald-500/60 text-left flex items-start gap-3 group transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 group-hover:text-amber-300 shrink-0">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[12px] text-slate-100 group-hover:text-amber-300">Full Page</div>
+                  <div className="text-[10px] text-slate-400 leading-tight mt-0.5">Capture the entire scrollable webpage from top to bottom</div>
+                </div>
+              </button>
+
+              {/* Capture Element */}
+              <button
+                type="button"
+                data-testid="screenshot-mode-element"
+                aria-label="Capture Webpage Element"
+                onClick={() => handleExecuteScreenshotMode('element')}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-[#0a0d12] hover:bg-emerald-950/60 hover:border-emerald-500/60 text-left flex items-start gap-3 group transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 group-hover:text-amber-300 shrink-0">
+                  <Maximize2 className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[12px] text-slate-100 group-hover:text-amber-300">Capture Element</div>
+                  <div className="text-[10px] text-slate-400 leading-tight mt-0.5">Hover and click to capture a specific webpage element</div>
+                </div>
+              </button>
+
+              {/* Current Video Frame */}
+              <button
+                type="button"
+                data-testid="screenshot-mode-video-frame"
+                aria-label="Capture Current Video Frame"
+                onClick={() => handleExecuteScreenshotMode('video_frame')}
+                className="w-full p-2.5 rounded-xl border border-slate-800 bg-[#0a0d12] hover:bg-emerald-950/60 hover:border-emerald-500/60 text-left flex items-start gap-3 group transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-red-500/10 text-red-400 group-hover:bg-red-500/20 group-hover:text-amber-300 shrink-0">
+                  <Video className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-[12px] text-slate-100 group-hover:text-amber-300">Current Video Frame</div>
+                  <div className="text-[10px] text-slate-400 leading-tight mt-0.5">Capture active video player frame with timestamp</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Footer */}
+            <div className="p-2.5 bg-[#0a0d12] border-t border-slate-800 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsScreenshotModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FOOTER */}
       <footer className="h-8 px-4 bg-[#0A0C0E] border-t border-slate-800/90 flex items-center justify-between text-[10px] text-slate-400 shrink-0">
         <div className="flex items-center gap-1.5">
@@ -1052,3 +1151,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     </div>
   );
 };
+
+export default ClippingWorkspace;
+

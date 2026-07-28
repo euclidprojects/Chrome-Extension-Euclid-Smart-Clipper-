@@ -331,7 +331,7 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
         canonicalUrl: pageUrl,
         sourceTitle: pageTitle,
         sourceDomain: new URL(pageUrl || 'https://notes.app.euclidprojects.org').hostname,
-        clipFormat: 'webpage_annotation',
+        clipFormat: 'screenshot',
         annotations: annotations,
         wordCount: extractedArticle.wordCount || 120,
         readingTime: 1,

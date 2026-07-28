@@ -1,9 +1,28 @@
 export type ClipType =
-  | 'webpage_annotation'
   | 'screenshot'
   | 'youtube_note'
   | 'bookmark'
+  | 'simplified_article'
   | 'full_page';
+
+export interface SaveClipRequest {
+  clipType: ClipType;
+  title: string;
+  sourceUrl: string;
+  canonicalUrl?: string;
+  content?: string;
+  annotations?: EuclidAnnotation[];
+  attachments?: EuclidAttachment[];
+  transcript?: TranscriptItem[];
+  videoNotes?: VideoTimestampNote[];
+  notebookId?: string;
+  folderId?: string;
+  tagIds?: string[];
+  existingNoteId?: string;
+  noteColor?: string;
+  userRemark?: string;
+  saveMode?: 'local' | 'sync';
+}
 
 export type EuclidNoteType =
   | 'standard'

@@ -31,7 +31,7 @@ if (cwContent.includes('alt="Favicon"') && cwContent.includes('domainName()')) {
 }
 
 // 2. Check Clipping Options order and position
-const approvedFormats = ['webpage_annotation', 'screenshot', 'youtube_note', 'bookmark', 'full_page'];
+const approvedFormats = ['screenshot', 'youtube_note', 'bookmark', 'simplified_article', 'full_page'];
 
 approvedFormats.forEach((fmt) => {
   if (!cwContent.includes(`id: '${fmt}'`)) {

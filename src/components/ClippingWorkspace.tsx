@@ -68,8 +68,8 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   onOpenSidePanel,
   onOpenSettings,
 }) => {
-  // Primary selected clip option - DEFAULT: webpage_annotation
-  const [clipFormat, setClipFormat] = useState<ClipFormatType>('webpage_annotation');
+  // Primary selected clip option - DEFAULT: screenshot
+  const [clipFormat, setClipFormat] = useState<ClipFormatType>('screenshot');
 
   // Page Context & Metadata
   const [url, setUrl] = useState('https://en.wikipedia.org/wiki/Euclid');
@@ -82,12 +82,15 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
   // Sub-choice for Screenshot mode
   const [screenshotMode, setScreenshotMode] = useState<'visible' | 'selection' | 'full' | 'video_frame'>('visible');
+  const [showScreenshotAnnotation, setShowScreenshotAnnotation] = useState(false);
 
-  // Full Page Options
+  // Full Page & Simplified Article Options
   const [includeImages, setIncludeImages] = useState(true);
   const [includeLinks, setIncludeLinks] = useState(true);
   const [includeTables, setIncludeTables] = useState(true);
   const [includeAnnotations, setIncludeAnnotations] = useState(true);
+  const [convertToMarkdown, setConvertToMarkdown] = useState(false);
+  const [includePageMetadata, setIncludePageMetadata] = useState(true);
 
   // YouTube Note State
   const [ytTimestamp, setYtTimestamp] = useState('02:45');
@@ -143,13 +146,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     testId: string;
   }> = [
     {
-      id: 'webpage_annotation',
-      label: 'Webpage Annotation',
-      description: 'Annotate and highlight webpage directly',
-      icon: <PenTool className="w-5 h-5 text-emerald-400" />,
-      testId: 'clip-option-webpage-annotation',
-    },
-    {
       id: 'screenshot',
       label: 'Screenshot',
       description: 'Capture visible area, selection, or video frame',
@@ -169,6 +165,13 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       description: 'Save link, summary, favicon & page metadata',
       icon: <Bookmark className="w-5 h-5 text-emerald-400" />,
       testId: 'clip-option-bookmark',
+    },
+    {
+      id: 'simplified_article',
+      label: 'Simplified Article',
+      description: 'Clean article view without ads & sidebars',
+      icon: <FileText className="w-5 h-5 text-emerald-400" />,
+      testId: 'clip-option-simplified-article',
     },
     {
       id: 'full_page',
@@ -249,11 +252,11 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
     try {
       let noteType: EuclidNoteType = 'web_clip';
-      if (clipFormat === 'webpage_annotation') noteType = 'annotated_screenshot';
       if (clipFormat === 'screenshot') noteType = 'screenshot';
       if (clipFormat === 'youtube_note') noteType = 'youtube';
       if (clipFormat === 'bookmark') noteType = 'bookmark';
-      if (clipFormat === 'full_page') noteType = 'article';
+      if (clipFormat === 'simplified_article') noteType = 'article';
+      if (clipFormat === 'full_page') noteType = 'web_clip';
 
       const selectedTagNames = tags
         .filter((t) => selectedTagIds.includes(t.id))
@@ -262,13 +265,15 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       let content = `<p>${noteRemark}</p>`;
       if (clipFormat === 'youtube_note' && ytNoteInput) {
         content = `<div><p><strong>Timestamp [${ytTimestamp}]:</strong> ${ytNoteInput}</p><p>${noteRemark}</p></div>`;
-      } else {
+      } else if (clipFormat === 'simplified_article') {
         const extractedArticle = clippingService.extractSimplifiedArticle(
           `<div><h1>${noteTitle}</h1><p>${noteRemark}</p></div>`,
           url,
           noteTitle
         );
         content = extractedArticle.cleanHtml || `<p>${noteRemark}</p>`;
+      } else {
+        content = `<p>${noteRemark}</p>`;
       }
 
       const newNoteId = 'note_' + Date.now();
@@ -439,32 +444,25 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
         {/* C. SELECTED CLIP-TYPE TOOLS & SETTINGS */}
         <div className="pt-3 space-y-3">
-          {clipFormat === 'webpage_annotation' && (
-            <div className="space-y-2">
-              <AnnotationPanel
-                notebooks={notebooks}
-                folders={folders}
-                tags={tags}
-                existingNotes={existingNotes}
-                onSaveNote={onSaveNote}
-                onCreateNotebook={onCreateNotebook}
-                onCreateFolder={onCreateFolder}
-                onCreateTag={onCreateTag}
-                onOpenSmartNotesNote={onOpenSmartNotesNote}
-                isFloatingOverlay={false}
-                pageTitle={pageTitle}
-                pageUrl={url}
-                hideHeaderAndSave={true}
-                hideDestinationControls={true}
-              />
-            </div>
-          )}
-
           {clipFormat === 'screenshot' && (
             <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-3">
-              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
-                Screenshot Options
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
+                  Screenshot Mode Options
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowScreenshotAnnotation(!showScreenshotAnnotation)}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                    showScreenshotAnnotation
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                  }`}
+                >
+                  {showScreenshotAnnotation ? 'Hide Tools' : 'Annotate Screenshot'}
+                </button>
+              </div>
+
               <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
                 <button
                   type="button"
@@ -511,16 +509,26 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                 </button>
               </div>
 
-              <div className="pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => alert(`Captured ${screenshotMode} screenshot.`)}
-                  className="w-full py-2 bg-emerald-950 text-emerald-300 border border-emerald-600/60 rounded-xl font-bold text-[12px] hover:bg-emerald-900 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Camera className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Capture Screenshot Preview</span>
-                </button>
-              </div>
+              {showScreenshotAnnotation && (
+                <div className="pt-2 border-t border-slate-800">
+                  <AnnotationPanel
+                    notebooks={notebooks}
+                    folders={folders}
+                    tags={tags}
+                    existingNotes={existingNotes}
+                    onSaveNote={onSaveNote}
+                    onCreateNotebook={onCreateNotebook}
+                    onCreateFolder={onCreateFolder}
+                    onCreateTag={onCreateTag}
+                    onOpenSmartNotesNote={onOpenSmartNotesNote}
+                    isFloatingOverlay={false}
+                    pageTitle={pageTitle}
+                    pageUrl={url}
+                    hideHeaderAndSave={true}
+                    hideDestinationControls={true}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -598,6 +606,69 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                 <p className="text-[11px] text-slate-400 line-clamp-2">
                   Bookmark will preserve the canonical link, metadata, domain info, and your personal remarks.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {clipFormat === 'simplified_article' && (
+            <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-3">
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
+                Simplified Article Extractor
+              </span>
+
+              <div className="p-2.5 bg-[#080b0f] border border-slate-800 rounded-xl space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between font-bold text-slate-100">
+                  <span className="truncate">{noteTitle}</span>
+                  <span className="px-2 py-0.5 bg-emerald-950 text-emerald-300 rounded border border-emerald-600/40 shrink-0 font-mono text-[10px]">
+                    Extracted Clean
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono">
+                  <span>~850 words • 3 min read</span>
+                  <span>4 images found</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold">
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeImages}
+                    onChange={(e) => setIncludeImages(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Images</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeLinks}
+                    onChange={(e) => setIncludeLinks(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Links</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={convertToMarkdown}
+                    onChange={(e) => setConvertToMarkdown(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Convert to Markdown</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includePageMetadata}
+                    onChange={(e) => setIncludePageMetadata(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Page Metadata</span>
+                </label>
               </div>
             </div>
           )}

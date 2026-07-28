@@ -13,36 +13,36 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
-          id: 'euclid-webpage-annotation',
-          title: 'Webpage Annotation',
-          contexts: ['all'],
-        });
-
-        chrome.contextMenus.create({
-          parentId: 'euclid-parent',
           id: 'euclid-screenshot',
-          title: 'Screenshot',
+          title: 'Capture Screenshot',
           contexts: ['all'],
         });
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
           id: 'euclid-youtube-note',
-          title: 'YouTube Note',
+          title: 'Create YouTube Note',
           contexts: ['all'],
         });
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
           id: 'euclid-bookmark',
-          title: 'Bookmark',
+          title: 'Save Bookmark',
+          contexts: ['all'],
+        });
+
+        chrome.contextMenus.create({
+          parentId: 'euclid-parent',
+          id: 'euclid-simplified-article',
+          title: 'Save Simplified Article',
           contexts: ['all'],
         });
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
           id: 'euclid-full-page',
-          title: 'Full Page',
+          title: 'Save Full Page',
           contexts: ['all'],
         });
 

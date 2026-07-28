@@ -21,6 +21,7 @@ export type ExtensionMessage =
   | { type: "CAPTURE_ELEMENT_METADATA"; action?: string }
   | { type: "GET_YOUTUBE_METADATA"; action?: string }
   | { type: "GET_VIDEO_TIMESTAMP"; action?: string }
+  | { type: "SEEK_YOUTUBE_VIDEO"; seconds?: number; action?: string }
   | { type: "PING_CONTENT_SCRIPT"; action?: string };
 
 export interface StructuredResponse<T = any> {
@@ -385,6 +386,23 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           case 'command_add_youtube_timestamp':
             const videoData = getVideoTimestampData();
             sendResponse({ success: !!videoData, data: videoData, error: videoData ? undefined : 'No active HTML5 video found on page' });
+            break;
+
+          case 'SEEK_YOUTUBE_VIDEO':
+          case 'seek_youtube_video':
+            const videoToSeek = document.querySelector('video') as HTMLVideoElement | null;
+            if (videoToSeek && typeof request.seconds === 'number' && !isNaN(request.seconds) && request.seconds >= 0) {
+              videoToSeek.currentTime = request.seconds;
+              sendResponse({
+                success: true,
+                data: { currentTime: videoToSeek.currentTime, duration: videoToSeek.duration || 0 }
+              });
+            } else {
+              sendResponse({
+                success: false,
+                error: 'Active video element not found or invalid target timestamp'
+              });
+            }
             break;
 
           default:

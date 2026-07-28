@@ -27,6 +27,8 @@ import {
   FileText,
   CheckSquare,
   Maximize2,
+  Edit3,
+  Play,
 } from 'lucide-react';
 import {
   EuclidNotebook,
@@ -99,9 +101,171 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const [convertToMarkdown, setConvertToMarkdown] = useState(false);
   const [includePageMetadata, setIncludePageMetadata] = useState(true);
 
-  // YouTube Note State
+  // YouTube Note State - Shared Single Source of Truth
   const [ytTimestamp, setYtTimestamp] = useState('02:45');
   const [ytNoteInput, setYtNoteInput] = useState('');
+  const [ytVideoDuration, setYtVideoDuration] = useState<number>(0);
+  const [isEditingYtTimestamp, setIsEditingYtTimestamp] = useState<boolean>(false);
+  const [ytTimestampInputText, setYtTimestampInputText] = useState<string>('02:45');
+  const [ytTimestampError, setYtTimestampError] = useState<string | null>(null);
+  const [isUserEditedYtTimestamp, setIsUserEditedYtTimestamp] = useState<boolean>(false);
+
+  // Helper: Parse MM:SS or HH:MM:SS string to total seconds (-1 if invalid)
+  const parseTimestampToSeconds = (str: string): number => {
+    if (!str || typeof str !== 'string') return -1;
+    const trimmed = str.trim();
+    if (!/^[0-9:]+$/.test(trimmed)) return -1;
+
+    const parts = trimmed.split(':');
+    if (parts.length < 2 || parts.length > 3) return -1;
+    if (parts.some((p) => p.length === 0 || isNaN(Number(p)))) return -1;
+
+    const nums = parts.map((p) => parseInt(p, 10));
+
+    if (parts.length === 2) {
+      const [m, s] = nums;
+      if (s < 0 || s > 59 || m < 0) return -1;
+      return m * 60 + s;
+    } else {
+      const [h, m, s] = nums;
+      if (s < 0 || s > 59 || m < 0 || m > 59 || h < 0) return -1;
+      return h * 3600 + m * 60 + s;
+    }
+  };
+
+  // Helper: Format total seconds into MM:SS or HH:MM:SS with 2-digit padding
+  const formatSecondsToTimestamp = (totalSeconds: number): string => {
+    if (isNaN(totalSeconds) || totalSeconds < 0) return '00:00';
+    const sec = Math.floor(totalSeconds);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+
+    const pad = (n: number) => n.toString().padStart(2, '0');
+
+    if (h > 0) {
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    }
+    return `${pad(m)}:${pad(s)}`;
+  };
+
+  // Helper: Seek YouTube video in active tab
+  const seekYouTubeVideo = (seconds: number) => {
+    if (seconds < 0) return;
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs[0];
+        if (activeTab?.id) {
+          chrome.tabs.sendMessage(
+            activeTab.id,
+            { type: 'SEEK_YOUTUBE_VIDEO', seconds },
+            () => {
+              if (chrome.runtime.lastError) {
+                // Ignore silent errors if tab is not content-script injected
+              }
+            }
+          );
+        }
+      });
+    }
+  };
+
+  // Helper: Validate entered timestamp string and update state
+  const validateAndSaveYtTimestamp = (inputStr: string): boolean => {
+    const raw = inputStr.trim();
+    if (!raw) {
+      setYtTimestampError('Timestamp cannot be empty.');
+      return false;
+    }
+
+    if (!/^[0-9:]+$/.test(raw)) {
+      setYtTimestampError('Invalid format. Use MM:SS or HH:MM:SS (e.g. 02:45).');
+      return false;
+    }
+
+    const parts = raw.split(':');
+    if (parts.length < 2 || parts.length > 3 || parts.some((p) => p.length === 0 || isNaN(Number(p)))) {
+      setYtTimestampError('Invalid format. Use MM:SS or HH:MM:SS.');
+      return false;
+    }
+
+    const nums = parts.map((p) => parseInt(p, 10));
+    let totalSec = 0;
+
+    if (parts.length === 2) {
+      const [m, s] = nums;
+      if (s < 0 || s > 59) {
+        setYtTimestampError('Seconds must be between 00 and 59.');
+        return false;
+      }
+      if (m < 0) {
+        setYtTimestampError('Invalid minute value.');
+        return false;
+      }
+      totalSec = m * 60 + s;
+    } else {
+      const [h, m, s] = nums;
+      if (s < 0 || s > 59) {
+        setYtTimestampError('Seconds must be between 00 and 59.');
+        return false;
+      }
+      if (m < 0 || m > 59) {
+        setYtTimestampError('Minutes must be between 00 and 59.');
+        return false;
+      }
+      if (h < 0) {
+        setYtTimestampError('Invalid hour value.');
+        return false;
+      }
+      totalSec = h * 3600 + m * 60 + s;
+    }
+
+    if (ytVideoDuration > 0 && totalSec > ytVideoDuration) {
+      setYtTimestampError('Timestamp cannot exceed the video duration.');
+      return false;
+    }
+
+    const formatted = formatSecondsToTimestamp(totalSec);
+    setYtTimestamp(formatted);
+    setYtTimestampInputText(formatted);
+    setYtTimestampError(null);
+    setIsUserEditedYtTimestamp(true);
+    setIsEditingYtTimestamp(false);
+
+    seekYouTubeVideo(totalSec);
+    return true;
+  };
+
+  // Helper: Read current playback position from YouTube video
+  const handleUseCurrentTime = () => {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs[0];
+        if (activeTab?.id) {
+          chrome.tabs.sendMessage(
+            activeTab.id,
+            { type: 'GET_VIDEO_TIMESTAMP' },
+            (res) => {
+              if (chrome.runtime.lastError) return;
+              if (res?.success && res?.data) {
+                const { currentTime, duration, formattedTime } = res.data;
+                if (typeof currentTime === 'number') {
+                  const newTimeStr = formattedTime || formatSecondsToTimestamp(currentTime);
+                  setYtTimestamp(newTimeStr);
+                  setYtTimestampInputText(newTimeStr);
+                  setYtTimestampError(null);
+                  setIsUserEditedYtTimestamp(true);
+                  if (typeof duration === 'number' && duration > 0) {
+                    setYtVideoDuration(duration);
+                  }
+                }
+              }
+            }
+          );
+        }
+      });
+    }
+  };
 
   // Destination Pickers
   const [selectedNotebookId, setSelectedNotebookId] = useState<string>(
@@ -205,6 +369,37 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     const checkYouTube = url.includes('youtube.com') || url.includes('youtu.be');
     setIsYouTubePage(checkYouTube);
   }, [url]);
+
+  // Fetch initial YouTube video metadata/timestamp if not manually edited yet
+  useEffect(() => {
+    if (isYouTubePage && !isUserEditedYtTimestamp) {
+      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          const activeTab = tabs[0];
+          if (activeTab?.id) {
+            chrome.tabs.sendMessage(
+              activeTab.id,
+              { type: 'GET_VIDEO_TIMESTAMP' },
+              (res) => {
+                if (chrome.runtime.lastError) return;
+                if (res?.success && res?.data) {
+                  const { currentTime, duration, formattedTime } = res.data;
+                  if (typeof duration === 'number' && duration > 0) {
+                    setYtVideoDuration(duration);
+                  }
+                  if (!isUserEditedYtTimestamp && typeof currentTime === 'number' && currentTime > 0) {
+                    const timeStr = formattedTime || formatSecondsToTimestamp(currentTime);
+                    setYtTimestamp(timeStr);
+                    setYtTimestampInputText(timeStr);
+                  }
+                }
+              }
+            );
+          }
+        });
+      }
+    }
+  }, [isYouTubePage, isUserEditedYtTimestamp]);
 
   // Approved 5 Clipping Options in EXACT specified order
   const approvedFormats: Array<{
@@ -622,23 +817,164 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                 </div>
               ) : (
                 <div className="p-3 bg-[#12161f] border border-red-500/30 rounded-2xl space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1 shrink-0">
                       <Youtube className="w-3.5 h-3.5 text-red-400" />
                       <span>YouTube Note Controls</span>
                     </span>
-                    <span className="text-[11px] font-mono text-amber-300 bg-black/40 px-2 py-0.5 rounded border border-slate-800">
-                      Timestamp: {ytTimestamp}
-                    </span>
+
+                    {/* EDITABLE TIMESTAMP CONTROL */}
+                    {!isEditingYtTimestamp ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Go To / Seek Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            seekYouTubeVideo(parseTimestampToSeconds(ytTimestamp));
+                          }}
+                          title={`Go to ${ytTimestamp} in YouTube video`}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 transition-colors cursor-pointer"
+                        >
+                          <Play className="w-3 h-3 fill-amber-300/30" />
+                        </button>
+
+                        {/* Interactive Click-to-edit Badge */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsEditingYtTimestamp(true);
+                            setYtTimestampInputText(ytTimestamp);
+                            setYtTimestampError(null);
+                          }}
+                          title="Edit timestamp"
+                          className="group flex items-center gap-1 text-[11px] font-mono text-amber-300 bg-[#080b0f] hover:bg-[#05080b] px-2 py-0.5 rounded-md border border-slate-800 hover:border-amber-400/60 cursor-pointer transition-colors"
+                        >
+                          <span>Timestamp:</span>
+                          <span className="font-bold underline decoration-amber-400/40 group-hover:decoration-amber-300">{ytTimestamp}</span>
+                          <Edit3 className="w-3 h-3 text-amber-300/70 group-hover:text-amber-300 ml-0.5" />
+                        </button>
+
+                        {/* Use Current Time Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleUseCurrentTime();
+                          }}
+                          title="Use current YouTube playback time"
+                          className="px-2 py-0.5 rounded-md bg-[#080b0f] hover:bg-emerald-950 text-slate-300 hover:text-emerald-300 border border-slate-800 hover:border-emerald-600/60 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <RotateCcw className="w-3 h-3 text-emerald-400" />
+                          <span className="hidden sm:inline">Use Current Time</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[11px] font-mono text-amber-300/80">Timestamp:</span>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={ytTimestampInputText}
+                          onChange={(e) => {
+                            setYtTimestampInputText(e.target.value);
+                            if (ytTimestampError) setYtTimestampError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              validateAndSaveYtTimestamp(ytTimestampInputText);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setIsEditingYtTimestamp(false);
+                              setYtTimestampInputText(ytTimestamp);
+                              setYtTimestampError(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (ytTimestampInputText.trim() !== ytTimestamp) {
+                              const valid = validateAndSaveYtTimestamp(ytTimestampInputText);
+                              if (!valid) {
+                                // Keep displayed error
+                              }
+                            } else {
+                              setIsEditingYtTimestamp(false);
+                              setYtTimestampError(null);
+                            }
+                          }}
+                          placeholder="MM:SS"
+                          title="Edit timestamp"
+                          className="w-20 h-6 px-1.5 bg-[#080b0f] border border-emerald-500 rounded text-[11px] font-mono font-bold text-amber-300 outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+
+                        {/* Confirm Edit */}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            validateAndSaveYtTimestamp(ytTimestampInputText);
+                          }}
+                          title="Save timestamp"
+                          className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                        >
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </button>
+
+                        {/* Cancel Edit */}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsEditingYtTimestamp(false);
+                            setYtTimestampInputText(ytTimestamp);
+                            setYtTimestampError(null);
+                          }}
+                          title="Cancel edit"
+                          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+
+                        {/* Use Current Time */}
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleUseCurrentTime();
+                          }}
+                          title="Use current YouTube playback time"
+                          className="p-1 rounded bg-[#080b0f] hover:bg-emerald-950 text-emerald-400 border border-slate-800 hover:border-emerald-600 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
+
+                  {/* ERROR DISPLAY IF VALIDATION FAILS */}
+                  {ytTimestampError && (
+                    <div className="text-[10px] text-red-400 font-semibold flex items-center gap-1 bg-red-950/60 p-1.5 rounded-md border border-red-800/80">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-400" />
+                      <span>{ytTimestampError}</span>
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-[11px] font-bold text-slate-400 block mb-1">Timestamped Note</label>
                     <input
                       type="text"
-                      placeholder="Add note at current timestamp..."
+                      placeholder={`Add note at timestamp ${ytTimestamp}...`}
                       value={ytNoteInput}
                       onChange={(e) => setYtNoteInput(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
                       className="w-full h-8 px-2.5 bg-[#080b0f] border border-slate-800 rounded-lg text-[12px] text-slate-100 outline-none focus:border-red-500"
                     />
                   </div>
@@ -646,11 +982,15 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                   <div className="grid grid-cols-3 gap-1.5 pt-1 text-[11px] font-bold">
                     <button
                       type="button"
-                      onClick={() => alert(`Added YouTube timestamp bookmark at ${ytTimestamp}`)}
-                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                      onClick={() => {
+                        seekYouTubeVideo(parseTimestampToSeconds(ytTimestamp));
+                        alert(`Added YouTube timestamp bookmark at ${ytTimestamp}`);
+                      }}
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      title={`Bookmark YouTube video at ${ytTimestamp}`}
                     >
                       <Bookmark className="w-3 h-3 text-amber-300" />
-                      <span>Bookmark</span>
+                      <span>Bookmark ({ytTimestamp})</span>
                     </button>
 
                     <button
@@ -658,19 +998,24 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        seekYouTubeVideo(parseTimestampToSeconds(ytTimestamp));
                         setScreenshotError(null);
                         setIsScreenshotDialogOpen(true);
                       }}
-                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      title={`Capture frame at ${ytTimestamp}`}
                     >
                       <Camera className="w-3 h-3 text-amber-300" />
-                      <span>Frame</span>
+                      <span>Frame ({ytTimestamp})</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => alert('Extracting YouTube video transcript...')}
-                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                      onClick={() => {
+                        alert(`Extracting YouTube video transcript at ${ytTimestamp}...`);
+                      }}
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                      title={`Extract transcript at ${ytTimestamp}`}
                     >
                       <FileText className="w-3 h-3 text-emerald-400" />
                       <span>Transcript</span>

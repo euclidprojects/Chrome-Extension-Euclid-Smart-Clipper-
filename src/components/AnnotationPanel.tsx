@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AnnotationToolbar } from './annotation/AnnotationToolbar';
+import { AnnotationToolId } from './annotation/annotationConfig';
 import {
   Highlighter,
   Underline,
@@ -107,26 +109,7 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
   const [pageUrl, setPageUrl] = useState(propPageUrl);
 
   // Active Tool state (out of 23 tools/controls)
-  const [activeTool, setActiveTool] = useState<
-    | 'highlight'
-    | 'underline'
-    | 'strikethrough'
-    | 'freehand'
-    | 'highlighter_pen'
-    | 'arrow'
-    | 'line'
-    | 'rectangle'
-    | 'circle'
-    | 'text_box'
-    | 'sticky_note'
-    | 'comment'
-    | 'numbered_marker'
-    | 'crop'
-    | 'blur'
-    | 'pixelate'
-    | 'eraser'
-    | 'none'
-  >('highlight');
+  const [activeTool, setActiveTool] = useState<AnnotationToolId>('highlight');
 
   // Annotation Visibility State
   const [areAnnotationsVisible, setAreAnnotationsVisible] = useState(true);
@@ -546,281 +529,25 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
             </div>
           )}
 
-          {/* 3. ANNOTATION TOOLBAR (23 Tools / Controls) */}
-          <div className="p-3 space-y-2 bg-[#0d151c]">
-            <div className="flex items-center justify-between text-[11px] font-bold text-emerald-300 uppercase tracking-wider">
-              <span>Annotation Toolbar</span>
-              <span className="text-amber-400 font-mono">23 Tools</span>
-            </div>
-
-            <div className="grid grid-cols-5 gap-1.5 bg-[#070b0e] p-1.5 rounded-xl border border-slate-800">
-              {/* 1. Text Highlight */}
-              <button
-                onClick={() => setActiveTool('highlight')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'highlight' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="1. Text Highlight"
-              >
-                <Highlighter className="w-4 h-4 text-amber-300" />
-              </button>
-
-              {/* 2. Underline */}
-              <button
-                onClick={() => setActiveTool('underline')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'underline' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="2. Underline"
-              >
-                <Underline className="w-4 h-4" />
-              </button>
-
-              {/* 3. Strikethrough */}
-              <button
-                onClick={() => setActiveTool('strikethrough')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'strikethrough' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="3. Strikethrough"
-              >
-                <Strikethrough className="w-4 h-4" />
-              </button>
-
-              {/* 4. Freehand Pen */}
-              <button
-                onClick={() => setActiveTool('freehand')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'freehand' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="4. Freehand Pen"
-              >
-                <PenTool className="w-4 h-4" />
-              </button>
-
-              {/* 5. Highlighter Pen */}
-              <button
-                onClick={() => setActiveTool('highlighter_pen')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'highlighter_pen' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="5. Highlighter Pen"
-              >
-                <Edit3 className="w-4 h-4 text-amber-300" />
-              </button>
-
-              {/* 6. Arrow */}
-              <button
-                onClick={() => setActiveTool('arrow')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'arrow' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="6. Arrow"
-              >
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              {/* 7. Straight Line */}
-              <button
-                onClick={() => setActiveTool('line')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'line' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="7. Straight Line"
-              >
-                <Minus className="w-4 h-4" />
-              </button>
-
-              {/* 8. Rectangle */}
-              <button
-                onClick={() => setActiveTool('rectangle')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'rectangle' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="8. Rectangle"
-              >
-                <Square className="w-4 h-4" />
-              </button>
-
-              {/* 9. Circle */}
-              <button
-                onClick={() => setActiveTool('circle')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'circle' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="9. Circle"
-              >
-                <Circle className="w-4 h-4" />
-              </button>
-
-              {/* 10. Text Box */}
-              <button
-                onClick={() => setActiveTool('text_box')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'text_box' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="10. Text Box"
-              >
-                <Type className="w-4 h-4" />
-              </button>
-
-              {/* 11. Sticky Note */}
-              <button
-                onClick={() => setActiveTool('sticky_note')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'sticky_note' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="11. Sticky Note"
-              >
-                <StickyNote className="w-4 h-4 text-amber-300" />
-              </button>
-
-              {/* 12. Comment */}
-              <button
-                onClick={() => setActiveTool('comment')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'comment' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="12. Comment"
-              >
-                <MessageSquare className="w-4 h-4" />
-              </button>
-
-              {/* 13. Numbered Marker */}
-              <button
-                onClick={() => setActiveTool('numbered_marker')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'numbered_marker' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="13. Numbered Marker"
-              >
-                <Hash className="w-4 h-4" />
-              </button>
-
-              {/* 14. Crop */}
-              <button
-                onClick={() => setActiveTool('crop')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'crop' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="14. Crop"
-              >
-                <Crop className="w-4 h-4" />
-              </button>
-
-              {/* 15. Blur */}
-              <button
-                onClick={() => setActiveTool('blur')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'blur' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="15. Blur"
-              >
-                <EyeOff className="w-4 h-4" />
-              </button>
-
-              {/* 16. Pixelate */}
-              <button
-                onClick={() => setActiveTool('pixelate')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'pixelate' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="16. Pixelate"
-              >
-                <Square className="w-4 h-4 text-emerald-400" />
-              </button>
-
-              {/* 17. Eraser */}
-              <button
-                onClick={() => setActiveTool('eraser')}
-                className={`p-2 rounded-lg transition-all flex justify-center ${
-                  activeTool === 'eraser' ? 'bg-emerald-600 text-white shadow-sm border border-amber-300' : 'text-slate-400 hover:text-white'
-                }`}
-                title="17. Eraser"
-              >
-                <Eraser className="w-4 h-4" />
-              </button>
-
-              {/* 18. Undo */}
-              <button
-                onClick={() => alert('Undo last annotation stroke')}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex justify-center"
-                title="18. Undo (Alt + Z)"
-              >
-                <Undo className="w-4 h-4" />
-              </button>
-
-              {/* 19. Redo */}
-              <button
-                onClick={() => alert('Redo annotation stroke')}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex justify-center"
-                title="19. Redo (Alt + Shift + Z)"
-              >
-                <Redo className="w-4 h-4" />
-              </button>
-
-              {/* 20. Delete Selected Annotation */}
-              <button
-                onClick={() => {
-                  if (annotations.length > 0) {
-                    handleDeleteAnnotation(annotations[0].id);
-                  }
-                }}
-                className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-950/50 transition-all flex justify-center"
-                title="20. Delete Selected Annotation"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-
-              {/* 21 & 22. Toggle Hide/Show Annotations */}
-              <button
-                onClick={() => setAreAnnotationsVisible(!areAnnotationsVisible)}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex justify-center"
-                title={areAnnotationsVisible ? '21. Hide Annotations' : '22. Show Annotations'}
-              >
-                {areAnnotationsVisible ? <Eye className="w-4 h-4 text-emerald-400" /> : <EyeOff className="w-4 h-4 text-slate-500" />}
-              </button>
-
-              {/* 23. Exit Annotation Mode */}
-              <button
-                onClick={() => setActiveTool('none')}
-                className="p-2 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-amber-950/50 transition-all flex justify-center"
-                title="23. Exit Annotation Mode (Escape)"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* 4. HIGHLIGHT COLOR PICKER (Compact row of colored circles) */}
-          <div className="p-3 space-y-2 bg-[#0a1015]">
-            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-              <span>Highlight Color</span>
-              <span className="text-amber-300 font-mono">
-                {highlightColors.find((c) => c.hex === selectedColor)?.name || 'Custom'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between gap-1.5 p-2 bg-[#06090d] rounded-xl border border-slate-800">
-              {highlightColors.map((color) => {
-                const isSel = selectedColor === color.hex;
-                return (
-                  <button
-                    key={color.hex}
-                    onClick={() => handleSelectColor(color.hex)}
-                    style={{ backgroundColor: color.hex }}
-                    className={`w-7 h-7 rounded-full border-2 transition-transform cursor-pointer flex items-center justify-center ${
-                      isSel
-                        ? 'border-white scale-110 shadow-[0_0_10px_rgba(255,255,255,0.6)] ring-2 ring-emerald-500'
-                        : 'border-transparent opacity-80 hover:opacity-100 hover:scale-105'
-                    }`}
-                    title={color.label}
-                  >
-                    {isSel && <Check className="w-4 h-4 text-slate-950 stroke-[3]" />}
-                  </button>
-                );
-              })}
-            </div>
+          {/* 3. ANNOTATION TOOLBAR (Grouped & Reorganized) */}
+          <div className="p-2.5 bg-[#0d151c]">
+            <AnnotationToolbar
+              activeTool={activeTool}
+              onSelectTool={(toolId) => setActiveTool(toolId)}
+              areAnnotationsVisible={areAnnotationsVisible}
+              onToggleVisibility={(vis) => setAreAnnotationsVisible(vis)}
+              onUndo={() => alert('Undo last annotation stroke')}
+              onRedo={() => alert('Redo annotation stroke')}
+              onDeleteSelected={() => {
+                if (annotations.length > 0) {
+                  handleDeleteAnnotation(annotations[0].id);
+                }
+              }}
+              onExitMode={() => setActiveTool('none')}
+              selectedColor={selectedColor}
+              onSelectColor={handleSelectColor}
+              annotationsCount={annotations.length}
+            />
           </div>
 
           {/* 5. ADD REMARK & COMMENT FIELD */}

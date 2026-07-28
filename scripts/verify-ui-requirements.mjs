@@ -49,6 +49,55 @@ if (saveClipMatches !== 1) {
   errors.push(`Expected exactly 1 Save Clip button with data-testid="save-clip", found ${saveClipMatches}`);
 }
 
+// 4. Verify Annotation Toolbar Redesign Structure
+const toolbarPath = path.resolve(process.cwd(), 'src/components/annotation/AnnotationToolbar.tsx');
+const configPath = path.resolve(process.cwd(), 'src/components/annotation/annotationConfig.ts');
+
+if (!fs.existsSync(toolbarPath) || !fs.existsSync(configPath)) {
+  errors.push('AnnotationToolbar.tsx or annotationConfig.ts is missing!');
+} else {
+  const tbContent = fs.readFileSync(toolbarPath, 'utf-8');
+  const cfgContent = fs.readFileSync(configPath, 'utf-8');
+
+  // Check 5 groups
+  const expectedGroups = ["'markup'", "'draw'", "'notes'", "'edit'", "'more'"];
+  expectedGroups.forEach((grp) => {
+    if (!cfgContent.includes(grp) && !tbContent.includes(grp)) {
+      errors.push(`Annotation Toolbar missing group ${grp}`);
+    }
+  });
+
+  // Check default tab
+  if (!tbContent.includes("setActiveGroup('markup')") && !tbContent.includes("useState<AnnotationGroup>('markup')")) {
+    errors.push('Annotation Toolbar does not default to Markup group');
+  }
+
+  // Check accessibility tab semantics
+  if (!tbContent.includes('role="tablist"') || !tbContent.includes('role="tab"') || !tbContent.includes('role="tabpanel"')) {
+    errors.push('Annotation Toolbar missing WAI-ARIA tab semantics');
+  }
+
+  // Check Delete Selected red styling
+  if (!tbContent.includes('bg-red-950') && !tbContent.includes('text-red-300')) {
+    errors.push('Delete Selected button missing red visual separation styling');
+  }
+
+  // Check Show / Hide single toggle
+  if (!tbContent.includes('Show Annotations') || !tbContent.includes('Hide Annotations')) {
+    errors.push('Show/Hide Annotations single toggle text missing');
+  }
+
+  // Check Exit Annotation Mode
+  if (!tbContent.includes('Exit Annotation Mode')) {
+    errors.push('Exit Annotation Mode button text missing');
+  }
+
+  // Check typing guard in keyboard shortcuts
+  if (!tbContent.includes('target.tagName === \'INPUT\'') || !tbContent.includes('target.tagName === \'TEXTAREA\'')) {
+    errors.push('Keyboard shortcuts missing guard against active input fields');
+  }
+}
+
 // 4. Verify Metadata Collection is intact
 const requiredMetadataFields = [
   'sourceUrl: url',

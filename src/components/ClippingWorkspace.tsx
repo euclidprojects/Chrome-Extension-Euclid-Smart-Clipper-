@@ -38,6 +38,7 @@ import {
   ScreenshotMode,
 } from '../types';
 import { clippingService } from '../services/clippingService';
+import { isSupportedPage } from '../utils/pageUtils';
 
 interface ClippingWorkspaceProps {
   notebooks: EuclidNotebook[];
@@ -270,17 +271,10 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         }
 
         const activeUrl = tab.url || url || '';
-        if (
-          activeUrl.startsWith('chrome://') ||
-          activeUrl.startsWith('chrome-extension://') ||
-          activeUrl.startsWith('edge://') ||
-          activeUrl.startsWith('about:') ||
-          activeUrl.includes('chromewebstore.google.com') ||
-          activeUrl.includes('chrome.google.com/webstore')
-        ) {
+        if (!isSupportedPage(activeUrl)) {
           resolve({
             success: false,
-            error: 'This page cannot be captured because Chrome restricts extension access.',
+            error: 'This page cannot be captured or annotated because Chrome does not allow extensions to access it.',
           });
           return;
         }

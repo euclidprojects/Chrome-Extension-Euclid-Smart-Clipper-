@@ -1,13 +1,20 @@
 // Content Script for Euclid Smart Clipper
-// Fully compliant Manifest V3 content script with text selection floating toolbars, resilient selectors, and annotation support.
+// Fully compliant Manifest V3 content script with Shadow DOM isolation, resilient selection tools, and clean overlay lifecycle management.
+
+import { isSupportedPage } from '../utils/pageUtils';
 
 export type ExtensionMessage =
   | { type: "GET_PAGE_METADATA"; action?: string }
   | { type: "GET_SELECTED_TEXT"; action?: string }
   | { type: "EXTRACT_ARTICLE"; action?: string }
   | { type: "DETECT_MEDIA"; action?: string }
+  | { type: "START_REGION_SELECTION"; action?: string }
+  | { type: "CANCEL_REGION_SELECTION"; action?: string }
+  | { type: "START_ELEMENT_SELECTION"; action?: string }
   | { type: "START_ANNOTATION_MODE"; action?: string }
   | { type: "STOP_ANNOTATION_MODE"; action?: string }
+  | { type: "CANCEL_ACTIVE_OVERLAY"; action?: string }
+  | { type: "CLEANUP_ACTIVE_OVERLAY"; action?: string }
   | { type: "CREATE_HIGHLIGHT"; color?: string; action?: string }
   | { type: "LOCATE_ANNOTATION"; id?: string; action?: string }
   | { type: "RESTORE_ANNOTATIONS"; annotations?: any[]; action?: string }
@@ -16,44 +23,269 @@ export type ExtensionMessage =
   | { type: "GET_VIDEO_TIMESTAMP"; action?: string }
   | { type: "PING_CONTENT_SCRIPT"; action?: string };
 
-interface StructuredResponse<T = any> {
+export interface StructuredResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
 }
 
-// Check Unsupported Page
-function checkIsUnsupportedPage(): boolean {
-  const url = window.location.href.toLowerCase();
-  return (
-    url.startsWith('chrome://') ||
-    url.startsWith('chrome-extension://') ||
-    url.startsWith('edge://') ||
-    url.startsWith('about:') ||
-    url.includes('chromewebstore.google.com') ||
-    url.includes('chrome.google.com/webstore')
+export type OverlayMode =
+  | 'none'
+  | 'region_selection'
+  | 'element_selection'
+  | 'annotation';
+
+let activeOverlayMode: OverlayMode = 'none';
+let overlayAbortController: AbortController | null = null;
+let currentRect: { x: number; y: number; width: number; height: number } | null = null;
+let elementHoverEl: HTMLElement | null = null;
+let pageAnnotations: any[] = [];
+let quickSelectionToolbarEl: HTMLElement | null = null;
+
+// ==========================================
+// 1. CENTRALIZED CLEANUP FUNCTION
+// ==========================================
+export function cleanupEuclidClipperOverlays(): void {
+  document
+    .querySelectorAll(
+      [
+        '#euclid-smart-clipper-root',
+        '#euclid-region-selection-overlay',
+        '#euclid-element-selection-overlay',
+        '#euclid-annotation-toolbar',
+        '#euclid-capture-toolbar',
+        '#euclid-quick-selection-toolbar',
+        '[data-euclid-clipper-overlay]',
+      ].join(',')
+    )
+    .forEach((element) => element.remove());
+
+  document.documentElement.classList.remove(
+    'euclid-annotation-active',
+    'euclid-region-selection-active',
+    'euclid-element-selection-active'
   );
+
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+
+  if (elementHoverEl) {
+    elementHoverEl.style.outline = '';
+    elementHoverEl = null;
+  }
+
+  if (quickSelectionToolbarEl) {
+    quickSelectionToolbarEl.remove();
+    quickSelectionToolbarEl = null;
+  }
+
+  activeOverlayMode = 'none';
+  stopOverlayListeners();
 }
 
-// Annotation State
-let isAnnotationMode = false;
-let annotationToolbarEl: HTMLElement | null = null;
-let quickSelectionToolbarEl: HTMLElement | null = null;
-let hoveredHighlightEl: HTMLElement | null = null;
-let youtubeBadgeCreated = false;
+function startOverlayListeners(): AbortSignal {
+  stopOverlayListeners();
+  overlayAbortController = new AbortController();
+  const signal = overlayAbortController.signal;
 
-// Store local annotations cache
-let pageAnnotations: any[] = [];
+  window.addEventListener(
+    'keydown',
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cleanupEuclidClipperOverlays();
+        chrome.runtime
+          .sendMessage({
+            type: 'OVERLAY_CANCELLED',
+            action: 'CANCEL_ACTIVE_OVERLAY',
+            data: { status: 'cancelled_by_escape' },
+          })
+          .catch(() => {});
+      }
+    },
+    { signal }
+  );
 
-// Initialize Message Listener safely
+  return signal;
+}
+
+function stopOverlayListeners(): void {
+  overlayAbortController?.abort();
+  overlayAbortController = null;
+}
+
+// ==========================================
+// 2. SHADOW DOM OVERLAY HOST CREATION
+// ==========================================
+function createOverlayHost(fullScreen: boolean = false): { host: HTMLElement; shadowRoot: ShadowRoot } {
+  cleanupEuclidClipperOverlays();
+
+  const host = document.createElement('div');
+  host.id = 'euclid-smart-clipper-root';
+  host.dataset.euclidClipperOverlay = 'true';
+
+  if (fullScreen) {
+    host.style.cssText = `
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 2147483647 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      pointer-events: auto !important;
+      overflow: hidden !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      background: transparent !important;
+    `;
+  } else {
+    host.style.cssText = `
+      position: fixed !important;
+      top: 12px !important;
+      right: 12px !important;
+      z-index: 2147483647 !important;
+      width: min(320px, calc(100vw - 24px)) !important;
+      max-height: calc(100vh - 24px) !important;
+      overflow: visible !important;
+      box-sizing: border-box !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      background: transparent !important;
+      pointer-events: auto !important;
+    `;
+  }
+
+  const shadowRoot = host.attachShadow({ mode: 'open' });
+  document.documentElement.appendChild(host);
+
+  return { host, shadowRoot };
+}
+
+function getShadowStyles(): string {
+  return `
+    :host {
+      all: initial;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      box-sizing: border-box;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    .euclid-toolbar {
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid #10b981;
+      border-radius: 12px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 15px rgba(16, 185, 129, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      width: 100%;
+    }
+    .euclid-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .euclid-logo {
+      width: 20px;
+      height: 20px;
+      background: linear-gradient(135deg, #10b981, #047857);
+      color: #ffffff;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 11px;
+      flex-shrink: 0;
+      border: 1px solid rgba(251, 191, 36, 0.6);
+    }
+    .euclid-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #fbbf24;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .euclid-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .btn-primary {
+      background: #10b981;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-weight: 700;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .btn-primary:hover {
+      background: #059669;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #f1f5f9;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-weight: 600;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .btn-secondary:hover {
+      background: #475569;
+    }
+    .btn-close {
+      background: transparent;
+      color: #94a3b8;
+      border: none;
+      border-radius: 6px;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .btn-close:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.15);
+    }
+  `;
+}
+
+// Clean up stale overlays immediately upon startup
+cleanupEuclidClipperOverlays();
+
+// ==========================================
+// 3. RUNTIME MESSAGE LISTENER
+// ==========================================
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener(
     (request: any, _sender: any, sendResponse: (response: StructuredResponse) => void) => {
       try {
-        if (checkIsUnsupportedPage()) {
+        if (!isSupportedPage(window.location.href)) {
+          cleanupEuclidClipperOverlays();
           sendResponse({
             success: false,
-            error: "This page cannot be annotated because Chrome does not allow extensions to access it."
+            error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
           });
           return true;
         }
@@ -77,7 +309,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 
           case 'CANCEL_REGION_SELECTION':
           case 'cancel_region_selection':
-            cleanupRegionSelection();
+          case 'CANCEL_ACTIVE_OVERLAY':
+          case 'CLEANUP_ACTIVE_OVERLAY':
+            cleanupEuclidClipperOverlays();
             sendResponse({ success: true, data: { status: 'cancelled' } });
             break;
 
@@ -85,6 +319,16 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           case 'start_element_selection':
             startElementSelection();
             sendResponse({ success: true, data: { status: 'selecting_element' } });
+            break;
+
+          case 'START_ANNOTATION_MODE':
+            startAnnotationMode();
+            sendResponse({ success: true, data: { annotationMode: true } });
+            break;
+
+          case 'STOP_ANNOTATION_MODE':
+            stopAnnotationMode();
+            sendResponse({ success: true, data: { annotationMode: false } });
             break;
 
           case 'GET_PAGE_METADATA':
@@ -105,16 +349,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 
           case 'DETECT_MEDIA':
             sendResponse({ success: true, data: detectMediaData() });
-            break;
-
-          case 'START_ANNOTATION_MODE':
-            startAnnotationMode();
-            sendResponse({ success: true, data: { annotationMode: true } });
-            break;
-
-          case 'STOP_ANNOTATION_MODE':
-            stopAnnotationMode();
-            sendResponse({ success: true, data: { annotationMode: false } });
             break;
 
           case 'CREATE_HIGHLIGHT':
@@ -169,16 +403,339 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
   );
 }
 
-// 1. PAGE METADATA
+// ==========================================
+// 4. REGION SELECTION WITH SHADOW DOM
+// ==========================================
+function startRegionSelection() {
+  if (!isSupportedPage(window.location.href)) return;
+
+  activeOverlayMode = 'region_selection';
+  startOverlayListeners();
+
+  const { shadowRoot } = createOverlayHost(true);
+
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
+    ${getShadowStyles()}
+    .backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      cursor: crosshair;
+      user-select: none;
+    }
+    .banner {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+    .selection-box {
+      position: absolute;
+      display: none;
+      border: 2px solid #10b981;
+      background: rgba(16, 185, 129, 0.12);
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+    }
+    .badge {
+      position: absolute;
+      top: -30px;
+      left: 0;
+      background: #10b981;
+      color: #064e3b;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+    .controls {
+      position: absolute;
+      bottom: -48px;
+      right: 0;
+      display: flex;
+      gap: 6px;
+    }
+  `;
+  shadowRoot.appendChild(styleEl);
+
+  const container = document.createElement('div');
+  container.className = 'backdrop';
+  container.innerHTML = `
+    <div class="banner">
+      <div class="euclid-toolbar">
+        <div class="euclid-brand">
+          <span class="euclid-logo">E</span>
+          <span class="euclid-text">Select an area to clip</span>
+        </div>
+        <div class="euclid-actions">
+          <button class="btn-close" aria-label="Close Euclid Smart Clipper toolbar" id="banner-close">✕</button>
+        </div>
+      </div>
+    </div>
+    <div class="selection-box" id="selection-box">
+      <div class="badge" id="selection-badge">0 × 0 px</div>
+      <div class="controls">
+        <button class="btn-primary" id="confirm-btn">✓ Capture Area</button>
+        <button class="btn-secondary" id="cancel-btn">✕ Cancel</button>
+      </div>
+    </div>
+  `;
+  shadowRoot.appendChild(container);
+
+  const box = shadowRoot.getElementById('selection-box') as HTMLElement;
+  const badge = shadowRoot.getElementById('selection-badge') as HTMLElement;
+  let isSelecting = false;
+  let startX = 0;
+  let startY = 0;
+
+  const onMouseDown = (e: MouseEvent) => {
+    const path = e.composedPath();
+    if (path.some((el: any) => el.id === 'confirm-btn' || el.id === 'cancel-btn' || el.id === 'banner-close')) return;
+
+    isSelecting = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    box.style.display = 'block';
+    updateBox(e.clientX, e.clientY);
+  };
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isSelecting) return;
+    updateBox(e.clientX, e.clientY);
+  };
+
+  const onMouseUp = () => {
+    if (isSelecting) {
+      isSelecting = false;
+    }
+  };
+
+  const updateBox = (clientX: number, clientY: number) => {
+    const left = Math.min(startX, clientX);
+    const top = Math.min(startY, clientY);
+    const width = Math.abs(clientX - startX);
+    const height = Math.abs(clientY - startY);
+
+    currentRect = { x: left, y: top, width, height };
+
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+
+    const dpr = window.devicePixelRatio || 1;
+    badge.textContent = `${Math.round(width * dpr)} × ${Math.round(height * dpr)} px`;
+  };
+
+  container.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+
+  shadowRoot.getElementById('banner-close')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cleanupEuclidClipperOverlays();
+    chrome.runtime.sendMessage({ type: 'OVERLAY_CANCELLED', action: 'CANCEL_ACTIVE_OVERLAY' }).catch(() => {});
+  });
+
+  shadowRoot.getElementById('cancel-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cleanupEuclidClipperOverlays();
+    chrome.runtime.sendMessage({ type: 'OVERLAY_CANCELLED', action: 'CANCEL_ACTIVE_OVERLAY' }).catch(() => {});
+  });
+
+  shadowRoot.getElementById('confirm-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (currentRect && currentRect.width > 5 && currentRect.height > 5) {
+      const dpr = window.devicePixelRatio || 1;
+      const selectionData = {
+        selectionRect: {
+          x: (currentRect.x + window.scrollX) * dpr,
+          y: (currentRect.y + window.scrollY) * dpr,
+          width: currentRect.width * dpr,
+          height: currentRect.height * dpr,
+          viewportX: currentRect.x,
+          viewportY: currentRect.y,
+          viewportWidth: currentRect.width,
+          viewportHeight: currentRect.height,
+          devicePixelRatio: dpr,
+        },
+        sourceUrl: window.location.href,
+        sourceTitle: document.title,
+      };
+
+      cleanupEuclidClipperOverlays();
+      chrome.runtime.sendMessage({
+        type: 'REGION_SELECTION_CONFIRMED',
+        data: selectionData,
+      }).catch((err) => console.error('Error sending region selection:', err));
+    } else {
+      alert('Please drag to select an area before confirming.');
+    }
+  });
+}
+
+// ==========================================
+// 5. ELEMENT SELECTION WITH SHADOW DOM
+// ==========================================
+function startElementSelection() {
+  if (!isSupportedPage(window.location.href)) return;
+
+  activeOverlayMode = 'element_selection';
+  startOverlayListeners();
+
+  const { shadowRoot } = createOverlayHost(false);
+
+  const styleEl = document.createElement('style');
+  styleEl.textContent = getShadowStyles();
+  shadowRoot.appendChild(styleEl);
+
+  const container = document.createElement('div');
+  container.className = 'euclid-toolbar';
+  container.innerHTML = `
+    <div class="euclid-brand">
+      <span class="euclid-logo">E</span>
+      <span class="euclid-text">Click element to capture</span>
+    </div>
+    <div class="euclid-actions">
+      <button class="btn-secondary" id="elem-cancel">✕ Cancel</button>
+      <button class="btn-close" aria-label="Close Euclid Smart Clipper toolbar" id="elem-close">✕</button>
+    </div>
+  `;
+  shadowRoot.appendChild(container);
+
+  const handleCancel = () => {
+    cleanupEuclidClipperOverlays();
+    chrome.runtime.sendMessage({ type: 'OVERLAY_CANCELLED', action: 'CANCEL_ACTIVE_OVERLAY' }).catch(() => {});
+  };
+
+  shadowRoot.getElementById('elem-cancel')?.addEventListener('click', handleCancel);
+  shadowRoot.getElementById('elem-close')?.addEventListener('click', handleCancel);
+
+  const onMouseMove = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (!target || target === document.body || target === document.documentElement) return;
+    if (target.closest('#euclid-smart-clipper-root')) return;
+
+    if (elementHoverEl) {
+      elementHoverEl.style.outline = '';
+    }
+    elementHoverEl = target;
+    elementHoverEl.style.outline = '3px solid #10b981';
+  };
+
+  const onClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target && target.closest('#euclid-smart-clipper-root')) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('click', onClick, true);
+
+    if (elementHoverEl) {
+      elementHoverEl.style.outline = '';
+      const rect = elementHoverEl.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      const selectionData = {
+        selectionRect: {
+          x: (rect.left + window.scrollX) * dpr,
+          y: (rect.top + window.scrollY) * dpr,
+          width: rect.width * dpr,
+          height: rect.height * dpr,
+          viewportX: rect.left,
+          viewportY: rect.top,
+          viewportWidth: rect.width,
+          viewportHeight: rect.height,
+          devicePixelRatio: dpr,
+        },
+        sourceUrl: window.location.href,
+        sourceTitle: document.title,
+      };
+
+      cleanupEuclidClipperOverlays();
+      chrome.runtime.sendMessage({
+        type: 'ELEMENT_SELECTED',
+        data: selectionData,
+      }).catch((err) => console.error('Error sending element selection:', err));
+    }
+  };
+
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('click', onClick, true);
+}
+
+// ==========================================
+// 6. ANNOTATION MODE TOOLBAR WITH SHADOW DOM
+// ==========================================
+function startAnnotationMode() {
+  if (!isSupportedPage(window.location.href)) return;
+
+  activeOverlayMode = 'annotation';
+  startOverlayListeners();
+
+  const { shadowRoot } = createOverlayHost(false);
+
+  const styleEl = document.createElement('style');
+  styleEl.textContent = `
+    ${getShadowStyles()}
+    .color-btn {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+  `;
+  shadowRoot.appendChild(styleEl);
+
+  const container = document.createElement('div');
+  container.className = 'euclid-toolbar';
+  container.innerHTML = `
+    <div class="euclid-brand">
+      <span class="euclid-logo">E</span>
+      <span class="euclid-text">Euclid Annotator</span>
+    </div>
+    <div class="euclid-actions">
+      <button class="color-btn" style="background: #FDE047" id="ann-hl-yellow" title="Yellow Highlight"></button>
+      <button class="color-btn" style="background: #4ADE80" id="ann-hl-green" title="Green Highlight"></button>
+      <button class="btn-primary" id="ann-done">Done</button>
+      <button class="btn-close" aria-label="Close Euclid Smart Clipper toolbar" id="ann-close">✕</button>
+    </div>
+  `;
+  shadowRoot.appendChild(container);
+
+  const handleFinish = () => {
+    cleanupEuclidClipperOverlays();
+    chrome.runtime.sendMessage({ type: 'OVERLAY_COMPLETED', action: 'CLEANUP_ACTIVE_OVERLAY' }).catch(() => {});
+  };
+
+  shadowRoot.getElementById('ann-hl-yellow')?.addEventListener('click', () => createHighlight('#FDE047'));
+  shadowRoot.getElementById('ann-hl-green')?.addEventListener('click', () => createHighlight('#4ADE80'));
+  shadowRoot.getElementById('ann-done')?.addEventListener('click', handleFinish);
+  shadowRoot.getElementById('ann-close')?.addEventListener('click', handleFinish);
+}
+
+function stopAnnotationMode() {
+  cleanupEuclidClipperOverlays();
+}
+
+// ==========================================
+// 7. PAGE METADATA & EXTRACTIONS
+// ==========================================
 function getPageMetadata() {
-  const isUnsupported = checkIsUnsupportedPage();
-  if (isUnsupported) {
+  if (!isSupportedPage(window.location.href)) {
     return {
       title: 'Restricted Browser Page',
       url: window.location.href,
-      domain: window.location.hostname,
+      domain: 'chrome',
       isUnsupported: true,
-      unsupportedMessage: "This page cannot be annotated because Chrome does not allow extensions to access it."
+      unsupportedMessage: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
     };
   }
 
@@ -225,7 +782,6 @@ function getPageMetadata() {
   };
 }
 
-// 2. SELECTED TEXT DATA WITH RESILIENT SELECTORS
 function getSelectedTextData() {
   const selection = window.getSelection();
   const text = selection ? selection.toString().trim() : '';
@@ -263,7 +819,6 @@ function getSelectedTextData() {
   };
 }
 
-// Get XPath helper
 function getXPathForElement(element: HTMLElement): string {
   if (element.id) return `//*[@id="${element.id}"]`;
   if (element === document.body) return '/html/body';
@@ -282,7 +837,6 @@ function getXPathForElement(element: HTMLElement): string {
   return '';
 }
 
-// Get CSS Selector helper
 function getCssSelectorForElement(element: HTMLElement): string {
   if (element.id) return `#${element.id}`;
   if (element.className && typeof element.className === 'string') {
@@ -292,7 +846,6 @@ function getCssSelectorForElement(element: HTMLElement): string {
   return element.tagName.toLowerCase();
 }
 
-// 3. EXTRACT ARTICLE DATA
 function extractArticleData() {
   const meta = getPageMetadata();
   const selectors = ['article', '[role="main"]', 'main', '.post-content', '.article-content', '.entry-content', '#content', '.content'];
@@ -338,7 +891,6 @@ function extractArticleData() {
   };
 }
 
-// 4. DETECT MEDIA DATA
 function detectMediaData() {
   const images: Array<{ src: string; alt: string; width: number; height: number }> = [];
   document.querySelectorAll('img').forEach(img => {
@@ -374,7 +926,6 @@ function detectMediaData() {
   };
 }
 
-// 5. YOUTUBE METADATA
 function getYouTubeMetadata() {
   const isYouTube = window.location.hostname.includes('youtube.com') && window.location.pathname.includes('/watch');
   if (!isYouTube) return null;
@@ -395,7 +946,6 @@ function getYouTubeMetadata() {
   };
 }
 
-// 6. VIDEO TIMESTAMP & FRAME
 function getVideoTimestampData() {
   const video = document.querySelector('video') as HTMLVideoElement | null;
   if (!video) return null;
@@ -430,8 +980,9 @@ function getVideoTimestampData() {
   };
 }
 
-// 7. HIGHLIGHT CREATION WITH RESILIENT ANCHORING
 function createHighlight(color: string = '#FDE047', comment?: string) {
+  if (!isSupportedPage(window.location.href)) return null;
+
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.toString().trim()) {
     return null;
@@ -441,7 +992,6 @@ function createHighlight(color: string = '#FDE047', comment?: string) {
   const text = selection.toString().trim();
   const highlightId = 'euclid-hl-' + Date.now();
 
-  // Context
   const selectedData = getSelectedTextData();
 
   try {
@@ -458,7 +1008,6 @@ function createHighlight(color: string = '#FDE047', comment?: string) {
     range.surroundContents(mark);
     selection.removeAllRanges();
 
-    // Remember last used color
     try {
       localStorage.setItem('euclid_last_color', color);
     } catch (e) {}
@@ -509,7 +1058,6 @@ function createHighlight(color: string = '#FDE047', comment?: string) {
   }
 }
 
-// 8. LOCATE ANNOTATION ON PAGE
 function locateAnnotationOnPage(id: string): boolean {
   if (!id) return false;
   const el = document.getElementById(id) || document.querySelector(`[data-annotation-id="${id}"]`);
@@ -517,7 +1065,6 @@ function locateAnnotationOnPage(id: string): boolean {
 
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   
-  // Pulse animation outline ring
   const origOutline = el.style.outline;
   const origBoxShadow = el.style.boxShadow;
   
@@ -532,14 +1079,12 @@ function locateAnnotationOnPage(id: string): boolean {
   return true;
 }
 
-// 9. RESTORE ANNOTATIONS ON PAGE REVISIT
 function restoreAnnotationsOnPage(annotations: any[]): number {
   if (!Array.isArray(annotations) || annotations.length === 0) return 0;
   let count = 0;
 
   annotations.forEach((ann) => {
     if (ann.selectedText) {
-      // Find text in page
       const exactText = ann.selectedText;
       const bodyText = document.body.innerText;
       if (bodyText.includes(exactText)) {
@@ -551,115 +1096,6 @@ function restoreAnnotationsOnPage(annotations: any[]): number {
   return count;
 }
 
-// 10. FLOATING QUICK SELECTION TOOLBAR ON TEXT SELECTION
-function showQuickSelectionToolbar(x: number, y: number, text: string) {
-  removeQuickSelectionToolbar();
-
-  quickSelectionToolbarEl = document.createElement('div');
-  quickSelectionToolbarEl.id = 'euclid-quick-selection-toolbar';
-  quickSelectionToolbarEl.style.cssText = `
-    position: absolute;
-    top: ${Math.max(10, y - 54)}px;
-    left: ${Math.max(10, x - 120)}px;
-    z-index: 999998;
-    background: #0f172a;
-    color: #ffffff;
-    padding: 6px 12px;
-    border-radius: 9999px;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 10px rgba(16,185,129,0.3);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid #059669;
-  `;
-
-  quickSelectionToolbarEl.innerHTML = `
-    <span style="background: #10b981; color: #fff; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px;">E</span>
-    <button data-color="#FDE047" style="background: #FDE047; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Yellow Highlight"></button>
-    <button data-color="#4ADE80" style="background: #4ADE80; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Green Highlight"></button>
-    <button data-color="#60A5FA" style="background: #60A5FA; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Blue Highlight"></button>
-    <button data-color="#F87171" style="background: #F87171; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Red Highlight"></button>
-    <button data-color="#C084FC" style="background: #C084FC; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Purple Highlight"></button>
-    <button data-color="#FB923C" style="background: #FB923C; border: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;" title="Orange Highlight"></button>
-    <button id="euclid-quick-comment" style="background: #1e293b; color: #38bdf8; border: none; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px;">💬 Comment</button>
-    <button id="euclid-quick-cancel" style="background: #334155; color: #94a3b8; border: none; border-radius: 6px; padding: 2px 6px; cursor: pointer; font-size: 11px;">✕</button>
-  `;
-
-  document.body.appendChild(quickSelectionToolbarEl);
-
-  // Add click listeners
-  quickSelectionToolbarEl.querySelectorAll('[data-color]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      const color = (e.currentTarget as HTMLElement).getAttribute('data-color') || '#FDE047';
-      createHighlight(color);
-      removeQuickSelectionToolbar();
-    });
-  });
-
-  document.getElementById('euclid-quick-comment')?.addEventListener('click', () => {
-    const comment = prompt('Add comment for highlight:');
-    if (comment) {
-      createHighlight('#FDE047', comment);
-    }
-    removeQuickSelectionToolbar();
-  });
-
-  document.getElementById('euclid-quick-cancel')?.addEventListener('click', () => {
-    removeQuickSelectionToolbar();
-  });
-}
-
-function removeQuickSelectionToolbar() {
-  if (quickSelectionToolbarEl) {
-    quickSelectionToolbarEl.remove();
-    quickSelectionToolbarEl = null;
-  }
-}
-
-// Mouseup text selection listener
-document.addEventListener('mouseup', (e: MouseEvent) => {
-  if (checkIsUnsupportedPage()) return;
-  const target = e.target as HTMLElement;
-  if (target && target.closest('#euclid-quick-selection-toolbar')) return;
-
-  const selection = window.getSelection();
-  if (selection && selection.toString().trim().length > 0) {
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    showQuickSelectionToolbar(rect.left + window.scrollX, rect.top + window.scrollY, selection.toString().trim());
-  } else {
-    setTimeout(() => removeQuickSelectionToolbar(), 200);
-  }
-});
-
-// 11. KEYBOARD SHORTCUTS LISTENER
-document.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (checkIsUnsupportedPage()) return;
-
-  // Alt + H -> Highlight selected text
-  if (e.altKey && e.key.toLowerCase() === 'h') {
-    e.preventDefault();
-    createHighlight(localStorage.getItem('euclid_last_color') || '#FDE047');
-    removeQuickSelectionToolbar();
-  }
-
-  // Alt + A -> Start Annotation Mode
-  if (e.altKey && e.key.toLowerCase() === 'a') {
-    e.preventDefault();
-    if (isAnnotationMode) stopAnnotationMode();
-    else startAnnotationMode();
-  }
-
-  // Escape -> Cancel active tools
-  if (e.key === 'Escape') {
-    removeQuickSelectionToolbar();
-  }
-});
-
-// 12. CAPTURE ACTIVE ELEMENT
 function captureElementMetadata() {
   const activeEl = document.activeElement as HTMLElement | null;
   if (!activeEl) return null;
@@ -674,296 +1110,19 @@ function captureElementMetadata() {
   };
 }
 
-// 13. ANNOTATION MODE TOOLBAR
-function startAnnotationMode() {
-  if (isAnnotationMode) return;
-  isAnnotationMode = true;
+// ==========================================
+// 8. SPA NAVIGATION & EVENT CLEANUP LISTENERS
+// ==========================================
+window.addEventListener('popstate', () => cleanupEuclidClipperOverlays());
+window.addEventListener('hashchange', () => cleanupEuclidClipperOverlays());
+window.addEventListener('yt-navigate-finish', () => cleanupEuclidClipperOverlays());
 
-  if (!annotationToolbarEl) {
-    annotationToolbarEl = document.createElement('div');
-    annotationToolbarEl.id = 'euclid-annotation-toolbar';
-    annotationToolbarEl.style.cssText = `
-      position: fixed;
-      top: 16px;
-      right: 16px;
-      z-index: 999999;
-      background: #0f172a;
-      color: #ffffff;
-      padding: 10px 16px;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 13px;
-      font-weight: 500;
-      border: 1px solid #10b981;
-    `;
-
-    annotationToolbarEl.innerHTML = `
-      <span style="background: #10b981; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">E</span>
-      <span>Euclid Annotator Active</span>
-      <button id="euclid-hl-yellow" style="background: #FDE047; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Yellow"></button>
-      <button id="euclid-hl-green" style="background: #4ADE80; border: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer;" title="Highlight Green"></button>
-      <button id="euclid-close-toolbar" style="background: #059669; color: #fff; border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; font-weight: 700;">Done</button>
-    `;
-
-    document.body.appendChild(annotationToolbarEl);
-
-    document.getElementById('euclid-hl-yellow')?.addEventListener('click', () => createHighlight('#FDE047'));
-    document.getElementById('euclid-hl-green')?.addEventListener('click', () => createHighlight('#4ADE80'));
-    document.getElementById('euclid-close-toolbar')?.addEventListener('click', () => stopAnnotationMode());
+let lastObservedUrl = window.location.href;
+setInterval(() => {
+  if (window.location.href !== lastObservedUrl) {
+    lastObservedUrl = window.location.href;
+    cleanupEuclidClipperOverlays();
   }
-}
-
-function stopAnnotationMode() {
-  isAnnotationMode = false;
-  if (annotationToolbarEl) {
-    annotationToolbarEl.remove();
-    annotationToolbarEl = null;
-  }
-}
-
-// 14. REGION SELECTION OVERLAY & EVENT HANDLERS
-let regionOverlayEl: HTMLElement | null = null;
-let isSelectingRegion = false;
-let startX = 0;
-let startY = 0;
-let currentRect: { x: number; y: number; width: number; height: number } | null = null;
-
-function startRegionSelection() {
-  cleanupRegionSelection();
-
-  regionOverlayEl = document.createElement('div');
-  regionOverlayEl.id = 'euclid-region-selection-overlay';
-  regionOverlayEl.style.cssText = `
-    position: fixed;
-    inset: 0;
-    z-index: 2147483647;
-    background: rgba(0, 0, 0, 0.4);
-    cursor: crosshair;
-    user-select: none;
-    font-family: system-ui, -apple-system, sans-serif;
-  `;
-
-  const banner = document.createElement('div');
-  banner.style.cssText = `
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #0f172a;
-    color: #f8fafc;
-    padding: 10px 20px;
-    border-radius: 12px;
-    border: 1px solid #10b981;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    font-size: 13px;
-    font-weight: 700;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `;
-  banner.innerHTML = `<span style="color:#10b981">✂️</span> Drag to select an area • Press Esc or Click Cancel to stop`;
-  regionOverlayEl.appendChild(banner);
-
-  const box = document.createElement('div');
-  box.id = 'euclid-selection-box';
-  box.style.cssText = `
-    position: absolute;
-    display: none;
-    border: 2px solid #10b981;
-    background: rgba(16, 185, 129, 0.08);
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
-    pointer-events: auto;
-  `;
-
-  const badge = document.createElement('div');
-  badge.id = 'euclid-selection-badge';
-  badge.style.cssText = `
-    position: absolute;
-    top: -30px;
-    left: 0;
-    background: #10b981;
-    color: #064e3b;
-    font-weight: 800;
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    white-space: nowrap;
-  `;
-  box.appendChild(badge);
-
-  const controls = document.createElement('div');
-  controls.id = 'euclid-selection-controls';
-  controls.style.cssText = `
-    position: absolute;
-    bottom: -45px;
-    right: 0;
-    display: flex;
-    gap: 6px;
-  `;
-  controls.innerHTML = `
-    <button id="euclid-confirm-btn" style="background:#10b981; color:#fff; border:none; padding:6px 14px; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer; box-shadow:0 4px 12px rgba(16,185,129,0.4);">✓ Capture Area</button>
-    <button id="euclid-cancel-btn" style="background:#334155; color:#f1f5f9; border:none; padding:6px 12px; border-radius:8px; font-weight:700; font-size:12px; cursor:pointer;">✕ Cancel</button>
-  `;
-  box.appendChild(controls);
-
-  regionOverlayEl.appendChild(box);
-  document.body.appendChild(regionOverlayEl);
-
-  const onMouseDown = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).closest('#euclid-selection-controls')) return;
-    isSelectingRegion = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    box.style.display = 'block';
-    updateBox(e.clientX, e.clientY);
-  };
-
-  const onMouseMove = (e: MouseEvent) => {
-    if (!isSelectingRegion) return;
-    updateBox(e.clientX, e.clientY);
-  };
-
-  const onMouseUp = () => {
-    if (isSelectingRegion) {
-      isSelectingRegion = false;
-    }
-  };
-
-  const updateBox = (clientX: number, clientY: number) => {
-    const left = Math.min(startX, clientX);
-    const top = Math.min(startY, clientY);
-    const width = Math.abs(clientX - startX);
-    const height = Math.abs(clientY - startY);
-
-    currentRect = { x: left, y: top, width, height };
-
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-    box.style.width = `${width}px`;
-    box.style.height = `${height}px`;
-
-    const dpr = window.devicePixelRatio || 1;
-    badge.textContent = `${Math.round(width * dpr)} × ${Math.round(height * dpr)} px`;
-  };
-
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      cleanupRegionSelection();
-      chrome.runtime.sendMessage({ type: 'CANCEL_REGION_SELECTION' }).catch(() => {});
-    }
-  };
-
-  regionOverlayEl.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
-  window.addEventListener('keydown', onKeyDown);
-
-  setTimeout(() => {
-    document.getElementById('euclid-confirm-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (currentRect && currentRect.width > 5 && currentRect.height > 5) {
-        const dpr = window.devicePixelRatio || 1;
-        const selectionData = {
-          selectionRect: {
-            x: (currentRect.x + window.scrollX) * dpr,
-            y: (currentRect.y + window.scrollY) * dpr,
-            width: currentRect.width * dpr,
-            height: currentRect.height * dpr,
-            viewportX: currentRect.x,
-            viewportY: currentRect.y,
-            viewportWidth: currentRect.width,
-            viewportHeight: currentRect.height,
-            devicePixelRatio: dpr,
-          },
-          sourceUrl: window.location.href,
-          sourceTitle: document.title,
-        };
-
-        cleanupRegionSelection();
-        chrome.runtime.sendMessage({
-          type: 'REGION_SELECTION_CONFIRMED',
-          data: selectionData,
-        }).catch((err) => console.error('Error sending region selection:', err));
-      } else {
-        alert('Please drag to select an area before confirming.');
-      }
-    });
-
-    document.getElementById('euclid-cancel-btn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      cleanupRegionSelection();
-      chrome.runtime.sendMessage({ type: 'CANCEL_REGION_SELECTION' }).catch(() => {});
-    });
-  }, 100);
-}
-
-function cleanupRegionSelection() {
-  if (regionOverlayEl) {
-    regionOverlayEl.remove();
-    regionOverlayEl = null;
-  }
-  isSelectingRegion = false;
-  currentRect = null;
-}
-
-// 15. ELEMENT SELECTION OVERLAY
-let elementHoverEl: HTMLElement | null = null;
-
-function startElementSelection() {
-  const onMouseMove = (e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (!target || target === document.body || target === document.documentElement) return;
-
-    if (elementHoverEl) {
-      elementHoverEl.style.outline = '';
-    }
-    elementHoverEl = target;
-    elementHoverEl.style.outline = '3px solid #10b981';
-  };
-
-  const onClick = (e: MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('click', onClick, true);
-
-    if (elementHoverEl) {
-      elementHoverEl.style.outline = '';
-      const rect = elementHoverEl.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-
-      const selectionData = {
-        selectionRect: {
-          x: (rect.left + window.scrollX) * dpr,
-          y: (rect.top + window.scrollY) * dpr,
-          width: rect.width * dpr,
-          height: rect.height * dpr,
-          viewportX: rect.left,
-          viewportY: rect.top,
-          viewportWidth: rect.width,
-          viewportHeight: rect.height,
-          devicePixelRatio: dpr,
-        },
-        sourceUrl: window.location.href,
-        sourceTitle: document.title,
-      };
-
-      chrome.runtime.sendMessage({
-        type: 'ELEMENT_SELECTED',
-        data: selectionData,
-      }).catch((err) => console.error('Error sending element selection:', err));
-      elementHoverEl = null;
-    }
-  };
-
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('click', onClick, true);
-}
+}, 1000);
 
 export {};

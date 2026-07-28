@@ -1,4 +1,3 @@
-import { firebaseConfig } from '../firebase/config';
 import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
 import { AUTH_MESSAGES } from '../constants/auth';
 
@@ -9,110 +8,82 @@ if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
   );
 }
 
-function rejectAfter(milliseconds: number): Promise<never> {
-  return new Promise((_, reject) => {
-    setTimeout(() => {
-      reject(new Error("The background service worker did not respond."));
-    }, milliseconds);
-  });
-}
-
 export async function initiateGoogleSignIn(): Promise<any> {
   console.info("[Google Auth] 1. Popup request started");
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
     try {
       // 1. Health check ping
-      const healthResponse = await Promise.race([
-        new Promise<any>((resolve) => {
+      let ping = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ type: "PING_BACKGROUND" }, (res) => {
+          if (chrome.runtime.lastError) {
+            console.warn("[Service Worker] PING_BACKGROUND error:", chrome.runtime.lastError.message);
+            resolve({ success: false });
+          } else {
+            resolve(res);
+          }
+        });
+      });
+
+      if (!ping?.success) {
+        ping = await new Promise<any>((resolve) => {
           chrome.runtime.sendMessage({ type: AUTH_MESSAGES.SERVICE_WORKER_PING }, (res) => {
             if (chrome.runtime.lastError) {
-              const errMsg = chrome.runtime.lastError.message || '';
-              console.warn("[Service Worker] Health check ping error:", errMsg);
-              resolve({
-                success: false,
-                error: {
-                  code: 'SERVICE_WORKER_UNAVAILABLE',
-                  message: 'The extension background service is unavailable. Reload the extension and try again.'
-                }
-              });
+              console.warn("[Service Worker] SERVICE_WORKER_PING error:", chrome.runtime.lastError.message);
+              resolve({ success: false });
             } else {
               resolve(res);
             }
           });
-        }),
-        rejectAfter(5000)
-      ]);
+        });
+      }
 
-      console.info("[Service Worker] Health response:", healthResponse);
-
-      if (
-        !healthResponse?.success ||
-        (healthResponse?.message !== "SERVICE_WORKER_PONG" && healthResponse?.data?.status !== "service_worker_active")
-      ) {
-        throw new Error(
-          healthResponse?.error?.message ||
-          "The extension background service is unavailable. Reload the extension and try again."
-        );
+      if (!ping?.success) {
+        throw new Error("The extension background service worker is unavailable.");
       }
 
       // 2. Main Google Auth request
-      const response = await Promise.race([
-        new Promise<any>((resolve) => {
-          chrome.runtime.sendMessage({ type: AUTH_MESSAGES.START_GOOGLE_SIGN_IN }, (res) => {
-            if (chrome.runtime.lastError) {
-              const errMsg = chrome.runtime.lastError.message || '';
-              console.error("[Google Auth] Chrome runtime error:", errMsg);
-              if (
-                errMsg.includes("Receiving end does not exist") ||
-                errMsg.includes("Could not establish connection")
-              ) {
-                resolve({
-                  success: false,
-                  error: {
-                    code: 'SERVICE_WORKER_UNAVAILABLE',
-                    message: 'The extension background service is not available. Reload the extension and try again.'
-                  }
-                });
-              } else {
-                resolve({
-                  success: false,
-                  error: {
-                    code: 'CHROME_RUNTIME_ERROR',
-                    message: errMsg
-                  }
-                });
+      const response = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ type: "GOOGLE_SIGN_IN" }, (res) => {
+          if (chrome.runtime.lastError) {
+            const errMsg = chrome.runtime.lastError.message || '';
+            console.error("[Google Auth] Chrome runtime error:", errMsg);
+            resolve({
+              success: false,
+              error: {
+                code: 'SERVICE_WORKER_UNAVAILABLE',
+                message: 'The extension background service worker is unavailable.'
               }
-            } else {
-              resolve(res);
-            }
-          });
-        }),
-        rejectAfter(35000)
-      ]);
+            });
+          } else {
+            resolve(res);
+          }
+        });
+      });
 
-      console.info("[Google Auth] 11. Response returned to popup", response);
+      console.info("[Google Auth] Response returned to popup:", response);
+      console.info("[Popup] Authentication completed");
 
       if (!response) {
-        throw new Error("The background service returned an empty response.");
+        throw new Error("The background service worker returned an empty response.");
       }
 
-      if (response.success && response.result?.user) {
-        return response.result.user;
+      if (!response.success) {
+        const rawErr = response.error;
+        const errMsg = typeof rawErr === 'object' && rawErr?.message
+          ? rawErr.message
+          : typeof rawErr === 'string'
+          ? rawErr
+          : 'Google authentication failed.';
+        throw new Error(errMsg);
       }
 
-      if (response.success && response.user) {
-        return response.user;
+      const userObj = response.user || response.result?.user;
+      if (!userObj) {
+        throw new Error("Google Sign-In returned invalid authentication user data.");
       }
 
-      const rawErr = response.error;
-      const errMsg = typeof rawErr === 'object' && rawErr?.message
-        ? rawErr.message
-        : typeof rawErr === 'string'
-        ? rawErr
-        : 'Google Sign-In returned invalid authentication data. Please try again.';
-
-      throw new Error(errMsg);
+      return userObj;
     } catch (e: any) {
       console.error("[Google Auth] Error in initiateGoogleSignIn:", e);
       throw e;
@@ -121,6 +92,3 @@ export async function initiateGoogleSignIn(): Promise<any> {
 
   throw new Error("Google sign-in requires running within the Chrome extension environment.");
 }
-
-
-

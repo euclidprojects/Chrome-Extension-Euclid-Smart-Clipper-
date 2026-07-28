@@ -2,29 +2,135 @@
 // Background Service Worker for Euclid Smart Clipper
 
 import { isSupportedPage } from '../utils/pageUtils';
-import { auth, firebaseConfig } from '../lib/firebase';
+import { auth } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-extension';
 import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
-console.info("[Service Worker] Euclid Smart Clipper worker loaded", {
+console.info("[Background] Service worker loaded", {
   extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
   timestamp: new Date().toISOString()
 });
 
-console.info("[Service Worker] Loaded", {
+console.info("[Service Worker] Euclid Smart Clipper worker loaded", {
   extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
   time: new Date().toISOString()
 });
 
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
-  console.warn(
+  console.info(
     "Confirm this origin is registered in Firebase Authorized Domains:",
     getCurrentExtensionOrigin()
   );
 }
 
-// Context Menu & Lifecycle Initialization
+// ---------------------------------------------------------------------------
+// Offscreen Document & Google Authentication Logic
+// ---------------------------------------------------------------------------
+const OFFSCREEN_PATH = "offscreen.html";
+let creatingOffscreen: Promise<void> | null = null;
+
+async function ensureOffscreenDocument(): Promise<void> {
+  console.info("[Background] Creating offscreen document");
+  console.info("[Google Auth] 3. Preparing offscreen document");
+
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_PATH);
+
+  if (typeof chrome !== 'undefined' && chrome.runtime && 'getContexts' in chrome.runtime) {
+    // @ts-ignore
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [offscreenUrl],
+    });
+    if (contexts.length > 0) {
+      console.info("[Background] Offscreen document ready");
+      console.info("[Google Auth] 4. Offscreen document ready");
+      return;
+    }
+  } else if (chrome.offscreen && 'hasDocument' in chrome.offscreen) {
+    // @ts-ignore
+    if (await chrome.offscreen.hasDocument()) {
+      console.info("[Background] Offscreen document ready");
+      console.info("[Google Auth] 4. Offscreen document ready");
+      return;
+    }
+  }
+
+  if (!creatingOffscreen) {
+    creatingOffscreen = chrome.offscreen.createDocument({
+      url: OFFSCREEN_PATH,
+      reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
+      justification: 'Use the hosted Firebase authentication page for Google sign-in.',
+    }).finally(() => {
+      creatingOffscreen = null;
+    });
+  }
+
+  await creatingOffscreen;
+  console.info("[Background] Offscreen document ready");
+  console.info("[Google Auth] 4. Offscreen document ready");
+}
+
+async function handleGoogleSignIn(): Promise<{ success: boolean; user?: any; idToken?: string; error?: any }> {
+  if (!chrome.offscreen) {
+    throw new Error('Offscreen API is not supported in this browser environment.');
+  }
+
+  await ensureOffscreenDocument();
+
+  console.info("[Background] Sending auth request to offscreen");
+  console.info("[Google Auth] 5. Sending request to offscreen document");
+
+  const response = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        target: 'offscreen',
+        type: 'FIREBASE_GOOGLE_SIGN_IN'
+      },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          console.error('[Google Auth] Offscreen runtime error:', chrome.runtime.lastError.message);
+          resolve({
+            success: false,
+            error: {
+              code: 'CHROME_RUNTIME_ERROR',
+              message: chrome.runtime.lastError.message || 'The offscreen authentication document returned no response.'
+            }
+          });
+        } else {
+          resolve(res);
+        }
+      }
+    );
+  });
+
+  if (!response) {
+    throw new Error('The offscreen authentication document returned no response.');
+  }
+
+  if (!response.success) {
+    const rawErr = response.error;
+    const errMsg = typeof rawErr === 'object' ? rawErr?.message : typeof rawErr === 'string' ? rawErr : 'Google authentication failed.';
+    const err = new Error(errMsg || 'Google authentication failed.');
+    (err as any).code = typeof rawErr === 'object' ? rawErr?.code : 'auth/offscreen-error';
+    throw err;
+  }
+
+  if (response.idToken && auth) {
+    try {
+      const credential = GoogleAuthProvider.credential(response.idToken);
+      await signInWithCredential(auth, credential);
+    } catch (e) {
+      console.warn('[Background] Firebase extension signInWithCredential warning:', e);
+    }
+  }
+
+  return response;
+}
+
+// ---------------------------------------------------------------------------
+// Context Menu & Extension Lifecycle Setup
+// ---------------------------------------------------------------------------
 if (typeof chrome !== 'undefined' && chrome.runtime) {
   chrome.runtime.onInstalled.addListener(() => {
     if (chrome.contextMenus) {
@@ -139,171 +245,317 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       });
     });
   }
+}
 
-  // Helper to open screenshot editor in responsive desktop window
-  const createEditorWindow = async (editorUrl: string) => {
-    let targetWidth = 1200;
-    let targetHeight = 850;
+// Helper to open screenshot editor in responsive desktop window
+const createEditorWindow = async (editorUrl: string) => {
+  let targetWidth = 1200;
+  let targetHeight = 850;
 
-    try {
-      if (chrome.system?.display) {
-        const displays = await chrome.system.display.getInfo();
-        const primary = displays.find((d) => d.isPrimary) || displays[0];
-        if (primary && primary.workArea) {
-          targetWidth = Math.max(760, Math.min(1200, primary.workArea.width - 40));
-          targetHeight = Math.max(560, Math.min(850, primary.workArea.height - 40));
-        }
+  try {
+    if (chrome.system?.display) {
+      const displays = await chrome.system.display.getInfo();
+      const primary = displays.find((d) => d.isPrimary) || displays[0];
+      if (primary && primary.workArea) {
+        targetWidth = Math.max(760, Math.min(1200, primary.workArea.width - 40));
+        targetHeight = Math.max(560, Math.min(850, primary.workArea.height - 40));
       }
-    } catch (e) {
-      // Fallback default
+    }
+  } catch (e) {
+    // Fallback default
+  }
+
+  return chrome.windows.create({
+    url: editorUrl,
+    type: 'popup',
+    width: targetWidth,
+    height: targetHeight,
+    focused: true,
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Primary Top-Level Background Message Listener
+// ---------------------------------------------------------------------------
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+
+  // Ignore messages targeted specifically for offscreen document
+  if (message.target === "offscreen") {
+    return false;
+  }
+
+  console.info("[Background] Message received", {
+    type: message?.type,
+    target: message?.target,
+    senderId: sender?.id
+  });
+
+  if (
+    message.type === "PING_BACKGROUND" ||
+    message.type === "SERVICE_WORKER_PING" ||
+    message.type === "PING_SERVICE_WORKER" ||
+    message.type === AuthMessages.SERVICE_WORKER_PING ||
+    message.type === AuthMessages.PING_BACKGROUND
+  ) {
+    sendResponse({
+      success: true,
+      status: "alive",
+      message: "SERVICE_WORKER_PONG",
+      extensionId: chrome.runtime.id,
+      data: { status: "service_worker_active" }
+    });
+    return false;
+  }
+
+  if (
+    message.type === "GOOGLE_SIGN_IN" ||
+    message.type === "START_GOOGLE_SIGN_IN" ||
+    message.type === AuthMessages.START_GOOGLE_SIGN_IN ||
+    message.type === AuthMessages.GOOGLE_SIGN_IN ||
+    message.type === "EUCLID_GOOGLE_SIGN_IN" ||
+    message.type === "GOOGLE_SIGN_IN_REQUEST"
+  ) {
+    console.info("[Background] GOOGLE_SIGN_IN received");
+    console.info("[Google Auth] 2. Service worker received request");
+
+    handleGoogleSignIn()
+      .then((result) => {
+        console.info("[Background] Authentication response received", result);
+        sendResponse({
+          success: true,
+          user: result.user,
+          idToken: result.idToken,
+          result: result
+        });
+      })
+      .catch((error) => {
+        console.error("[Background Google Auth Error]", error);
+
+        sendResponse({
+          success: false,
+          error: {
+            code: error?.code || "auth/unknown-error",
+            message: error?.message || String(error)
+          }
+        });
+      });
+
+    // Exact literal true required to keep channel open for async response
+    return true;
+  }
+
+  if (message.type === 'START_SCREENSHOT_CAPTURE') {
+    handleStartScreenshotCapture(message.payload)
+      .then((result) => sendResponse(result))
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : 'Screenshot capture failed.',
+        })
+      );
+    return true;
+  }
+
+  // Trigger Region Selection on active tab
+  if (message.type === 'START_REGION_SELECTION' || message.type === 'start_region_selection') {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0];
+      if (!tab || !tab.id) {
+        sendResponse({ success: false, error: 'No active tab found' });
+        return;
+      }
+
+      if (!isSupportedPage(tab.url)) {
+        sendResponse({
+          success: false,
+          error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
+        });
+        return;
+      }
+
+      chrome.tabs.sendMessage(tab.id, { type: 'START_REGION_SELECTION' }, (response) => {
+        if (chrome.runtime.lastError) {
+          chrome.scripting.executeScript({
+            target: { tabId: tab.id! },
+            files: ['contentScript.js'],
+          }).then(() => {
+            chrome.tabs.sendMessage(tab.id!, { type: 'START_REGION_SELECTION' }, (res2) => {
+              sendResponse(res2 || { success: true });
+            });
+          }).catch(() => {
+            sendResponse({
+              success: false,
+              error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
+            });
+          });
+        } else {
+          sendResponse(response || { success: true });
+        }
+      });
+    });
+    return true;
+  }
+
+  // Region selection confirmed -> capture visible tab -> save job -> open editor window
+  if (message.type === 'REGION_SELECTION_CONFIRMED' || message.type === 'ELEMENT_SELECTED') {
+    const selectionData = message.data;
+    const tabId = sender.tab?.id;
+
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { type: 'CLEANUP_ACTIVE_OVERLAY' }).catch(() => {});
     }
 
-    return chrome.windows.create({
-      url: editorUrl,
-      type: 'popup',
-      width: targetWidth,
-      height: targetHeight,
-      focused: true,
-    });
-  };
+    chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        console.error('Failed to capture visible tab:', chrome.runtime.lastError);
+        return;
+      }
 
-  // Background Message Listener
-  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.info("[Service Worker] Message received", {
-      type: request?.type,
-      target: request?.target,
-      senderId: sender?.id
-    });
+      const jobId = 'job_' + Date.now();
+      const jobData = {
+        id: jobId,
+        type: message.type === 'ELEMENT_SELECTED' ? 'element' : 'selected_area',
+        tabId: tabId || 0,
+        sourceUrl: selectionData?.sourceUrl || sender.tab?.url || '',
+        sourceTitle: selectionData?.sourceTitle || sender.tab?.title || 'Captured Area',
+        createdAt: Date.now(),
+        status: 'editing',
+        dataUrl: dataUrl,
+        selectionRect: selectionData?.selectionRect,
+      };
 
-    if (
-      request?.type === 'SERVICE_WORKER_PING' ||
-      request?.type === 'PING_SERVICE_WORKER' ||
-      request?.type === AuthMessages.SERVICE_WORKER_PING
-    ) {
-      sendResponse({
-        success: true,
-        message: 'SERVICE_WORKER_PONG',
-        extensionId: chrome.runtime.id,
-        data: { status: 'service_worker_active' }
+      try {
+        if (chrome.storage?.session) {
+          await chrome.storage.session.set({ [jobId]: jobData });
+        }
+        await chrome.storage?.local.set({ [jobId]: jobData });
+      } catch (e) {
+        console.warn('Storage save fallback:', e);
+      }
+
+      const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+      createEditorWindow(editorUrl);
+    });
+    return true;
+  }
+
+  // Capture visible tab directly
+  if (message.type === 'CAPTURE_VISIBLE_TAB') {
+    chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        sendResponse({ success: false, error: 'Capture failed' });
+        return;
+      }
+
+      const jobId = 'job_' + Date.now();
+      const jobData = {
+        id: jobId,
+        type: 'visible_page',
+        sourceUrl: sender.tab?.url || message.data?.sourceUrl || '',
+        sourceTitle: sender.tab?.title || message.data?.sourceTitle || 'Visible Webpage',
+        createdAt: Date.now(),
+        status: 'editing',
+        dataUrl: dataUrl,
+      };
+
+      if (chrome.storage?.session) {
+        await chrome.storage.session.set({ [jobId]: jobData });
+      }
+      await chrome.storage?.local.set({ [jobId]: jobData });
+
+      const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+      createEditorWindow(editorUrl);
+
+      sendResponse({ success: true, data: { jobId } });
+    });
+    return true;
+  }
+
+  if (message.type === 'OVERLAY_CANCELLED') {
+    if (sender.tab?.id) {
+      chrome.tabs.sendMessage(sender.tab.id, { type: 'CLEANUP_ACTIVE_OVERLAY' }).catch(() => {});
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
+  return false;
+});
+
+async function handleStartScreenshotCapture(payload: {
+  jobId: string;
+  mode: string;
+  tabId: number;
+  sourceUrl: string;
+  sourceTitle: string;
+}): Promise<{ success: boolean; jobId?: string; error?: string }> {
+  const { jobId, mode, tabId, sourceUrl, sourceTitle } = payload;
+
+  if (!tabId) {
+    return { success: false, error: 'The active tab could not be detected.' };
+  }
+
+  let tab: any;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (e) {
+    return { success: false, error: 'The active tab could not be detected.' };
+  }
+
+  const url = tab.url || sourceUrl || '';
+  if (!isSupportedPage(url)) {
+    return {
+      success: false,
+      error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
+    };
+  }
+
+  const ensureContentScript = async (): Promise<boolean> => {
+    try {
+      const pong = await new Promise((res) => {
+        chrome.tabs.sendMessage(tabId, { type: 'PING_CONTENT_SCRIPT' }, (response) => {
+          if (chrome.runtime.lastError || !response?.success) {
+            res(false);
+          } else {
+            res(true);
+          }
+        });
       });
+      if (pong) return true;
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['contentScript.js'],
+      });
+      return true;
+    } catch (err) {
       return false;
     }
+  };
 
-    if (
-      request?.type === AuthMessages.START_GOOGLE_SIGN_IN ||
-      request?.type === 'START_GOOGLE_SIGN_IN' ||
-      request?.type === 'EUCLID_GOOGLE_SIGN_IN' ||
-      request?.type === 'GOOGLE_SIGN_IN_REQUEST'
-    ) {
-      console.info("[Google Auth] 2. Service worker received request");
-
-      handleGoogleSignInOffscreen()
-        .then((res) => {
-          if (res?.success) {
-            sendResponse({
-              success: true,
-              result: res,
-              user: res.user
-            });
-          } else {
-            sendResponse(res);
-          }
-        })
-        .catch((err) => {
-          console.error("[Google Auth] Service-worker error", {
-            code: err?.code,
-            message: err?.message,
-            stack: err?.stack
-          });
-          sendResponse({
-            success: false,
-            error: {
-              code: err?.code || 'auth/service-worker-error',
-              message: err?.message || 'Google Sign-In could not be completed.'
-            }
-          });
-        });
-      return true;
-    }
-
-    if (request.type === 'START_SCREENSHOT_CAPTURE') {
-      handleStartScreenshotCapture(request.payload)
-        .then((result) => sendResponse(result))
-        .catch((error) =>
-          sendResponse({
-            success: false,
-            error: error instanceof Error ? error.message : 'Screenshot capture failed.',
-          })
-        );
-      return true;
-    }
-
-    // Trigger Region Selection on active tab
-    if (request.type === 'START_REGION_SELECTION' || request.type === 'start_region_selection') {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tab = tabs[0];
-        if (!tab || !tab.id) {
-          sendResponse({ success: false, error: 'No active tab found' });
-          return;
-        }
-
-        if (!isSupportedPage(tab.url)) {
-          sendResponse({
-            success: false,
-            error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
-          });
-          return;
-        }
-
-        chrome.tabs.sendMessage(tab.id, { type: 'START_REGION_SELECTION' }, (response) => {
-          if (chrome.runtime.lastError) {
-            chrome.scripting.executeScript({
-              target: { tabId: tab.id! },
-              files: ['contentScript.js'],
-            }).then(() => {
-              chrome.tabs.sendMessage(tab.id!, { type: 'START_REGION_SELECTION' }, (res2) => {
-                sendResponse(res2 || { success: true });
-              });
-            }).catch((err) => {
-              sendResponse({
-                success: false,
-                error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
-              });
-            });
-          } else {
-            sendResponse(response || { success: true });
-          }
-        });
-      });
-      return true;
-    }
-
-    // Region selection confirmed -> capture visible tab -> save job -> open editor window
-    if (request.type === 'REGION_SELECTION_CONFIRMED' || request.type === 'ELEMENT_SELECTED') {
-      const selectionData = request.data;
-      const tabId = sender.tab?.id;
-
-      if (tabId) {
-        chrome.tabs.sendMessage(tabId, { type: 'CLEANUP_ACTIVE_OVERLAY' }).catch(() => {});
-      }
-
-      chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
+  if (mode === 'visible_area') {
+    return new Promise((resolve) => {
+      chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
         if (chrome.runtime.lastError || !dataUrl) {
-          console.error('Failed to capture visible tab:', chrome.runtime.lastError);
+          resolve({
+            success: false,
+            error: chrome.runtime.lastError?.message || 'Failed to capture visible area.',
+          });
           return;
         }
 
-        const jobId = 'job_' + Date.now();
         const jobData = {
           id: jobId,
-          type: request.type === 'ELEMENT_SELECTED' ? 'element' : 'selected_area',
-          tabId: tabId || 0,
-          sourceUrl: selectionData?.sourceUrl || sender.tab?.url || '',
-          sourceTitle: selectionData?.sourceTitle || sender.tab?.title || 'Captured Area',
+          type: 'visible_page',
+          tabId,
+          sourceUrl: url,
+          sourceTitle: tab.title || sourceTitle || 'Visible Webpage',
           createdAt: Date.now(),
           status: 'editing',
-          dataUrl: dataUrl,
-          selectionRect: selectionData?.selectionRect,
+          dataUrl,
         };
 
         try {
@@ -312,445 +564,155 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
           }
           await chrome.storage?.local.set({ [jobId]: jobData });
         } catch (e) {
-          console.warn('Storage save fallback:', e);
+          console.warn('Storage save warning:', e);
         }
 
         const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
         createEditorWindow(editorUrl);
+
+        resolve({ success: true, jobId });
       });
-      return true;
-    }
+    });
+  }
 
-    // Capture visible tab directly
-    if (request.type === 'CAPTURE_VISIBLE_TAB') {
-      chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
-        if (chrome.runtime.lastError || !dataUrl) {
-          sendResponse({ success: false, error: 'Capture failed' });
-          return;
-        }
-
-        const jobId = 'job_' + Date.now();
-        const jobData = {
-          id: jobId,
-          type: 'visible_page',
-          sourceUrl: sender.tab?.url || request.data?.sourceUrl || '',
-          sourceTitle: sender.tab?.title || request.data?.sourceTitle || 'Visible Webpage',
-          createdAt: Date.now(),
-          status: 'editing',
-          dataUrl: dataUrl,
-        };
-
-        if (chrome.storage?.session) {
-          await chrome.storage.session.set({ [jobId]: jobData });
-        }
-        await chrome.storage?.local.set({ [jobId]: jobData });
-
-        const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-        createEditorWindow(editorUrl);
-
-        sendResponse({ success: true, data: { jobId } });
-      });
-      return true;
-    }
-
-    if (request.type === 'OVERLAY_CANCELLED') {
-      if (sender.tab?.id) {
-        chrome.tabs.sendMessage(sender.tab.id, { type: 'CLEANUP_ACTIVE_OVERLAY' }).catch(() => {});
-      }
-      sendResponse({ success: true });
-      return true;
-    }
-  });
-
-  async function handleStartScreenshotCapture(payload: {
-    jobId: string;
-    mode: string;
-    tabId: number;
-    sourceUrl: string;
-    sourceTitle: string;
-  }): Promise<{ success: boolean; jobId?: string; error?: string }> {
-    const { jobId, mode, tabId, sourceUrl, sourceTitle } = payload;
-
-    if (!tabId) {
-      return { success: false, error: 'The active tab could not be detected.' };
-    }
-
-    let tab: any;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch (e) {
-      return { success: false, error: 'The active tab could not be detected.' };
-    }
-
-    const url = tab.url || sourceUrl || '';
-    if (!isSupportedPage(url)) {
+  if (mode === 'selected_area') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
       return {
         success: false,
         error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
       };
     }
 
-    const ensureContentScript = async (): Promise<boolean> => {
-      try {
-        const pong = await new Promise((res) => {
-          chrome.tabs.sendMessage(tabId, { type: 'PING_CONTENT_SCRIPT' }, (response) => {
-            if (chrome.runtime.lastError || !response?.success) {
-              res(false);
-            } else {
-              res(true);
-            }
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'START_REGION_SELECTION' }, (response) => {
+        if (chrome.runtime.lastError || (response && !response.success)) {
+          resolve({
+            success: false,
+            error: response?.error || "This page cannot be captured or annotated because Chrome does not allow extensions to access it.",
           });
-        });
-        if (pong) return true;
-
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['contentScript.js'],
-        });
-        return true;
-      } catch (err) {
-        return false;
-      }
-    };
-
-    if (mode === 'visible_area') {
-      return new Promise((resolve) => {
-        chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
-          if (chrome.runtime.lastError || !dataUrl) {
-            resolve({
-              success: false,
-              error: chrome.runtime.lastError?.message || 'Failed to capture visible area.',
-            });
-            return;
-          }
-
-          const jobData = {
-            id: jobId,
-            type: 'visible_page',
-            tabId,
-            sourceUrl: url,
-            sourceTitle: tab.title || sourceTitle || 'Visible Webpage',
-            createdAt: Date.now(),
-            status: 'editing',
-            dataUrl,
-          };
-
-          try {
-            if (chrome.storage?.session) {
-              await chrome.storage.session.set({ [jobId]: jobData });
-            }
-            await chrome.storage?.local.set({ [jobId]: jobData });
-          } catch (e) {
-            console.warn('Storage save warning:', e);
-          }
-
-          const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-          createEditorWindow(editorUrl);
-
+        } else {
           resolve({ success: true, jobId });
-        });
-      });
-    }
-
-    if (mode === 'selected_area') {
-      const csReady = await ensureContentScript();
-      if (!csReady) {
-        return {
-          success: false,
-          error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
-        };
-      }
-
-      return new Promise((resolve) => {
-        chrome.tabs.sendMessage(tabId, { type: 'START_REGION_SELECTION' }, (response) => {
-          if (chrome.runtime.lastError || (response && !response.success)) {
-            resolve({
-              success: false,
-              error: response?.error || "This page cannot be captured or annotated because Chrome does not allow extensions to access it.",
-            });
-          } else {
-            resolve({ success: true, jobId });
-          }
-        });
-      });
-    }
-
-    if (mode === 'element') {
-      const csReady = await ensureContentScript();
-      if (!csReady) {
-        return {
-          success: false,
-          error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
-        };
-      }
-
-      return new Promise((resolve) => {
-        chrome.tabs.sendMessage(tabId, { type: 'START_ELEMENT_SELECTION' }, (response) => {
-          if (chrome.runtime.lastError || (response && !response.success)) {
-            resolve({
-              success: false,
-              error: response?.error || 'Element selection could not start.',
-            });
-          } else {
-            resolve({ success: true, jobId });
-          }
-        });
-      });
-    }
-
-    if (mode === 'video_frame') {
-      const csReady = await ensureContentScript();
-      if (!csReady) {
-        return { success: false, error: 'No supported video was detected.' };
-      }
-
-      return new Promise((resolve) => {
-        chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_TIMESTAMP' }, async (response) => {
-          if (chrome.runtime.lastError || !response || !response.success || !response.data) {
-            resolve({ success: false, error: 'No supported video was detected.' });
-            return;
-          }
-
-          const videoData = response.data;
-          chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
-            const finalDataUrl = videoData.frameDataUrl || dataUrl;
-            if (!finalDataUrl) {
-              resolve({ success: false, error: 'Failed to capture video frame.' });
-              return;
-            }
-
-            const jobData = {
-              id: jobId,
-              type: 'video_frame',
-              tabId,
-              sourceUrl: url,
-              sourceTitle: videoData.videoTitle || tab.title || sourceTitle,
-              createdAt: Date.now(),
-              status: 'editing',
-              dataUrl: finalDataUrl,
-              videoTimestamp: videoData.currentTime,
-              formattedVideoTime: videoData.formattedTime,
-            };
-
-            try {
-              if (chrome.storage?.session) {
-                await chrome.storage.session.set({ [jobId]: jobData });
-              }
-              await chrome.storage?.local.set({ [jobId]: jobData });
-            } catch (e) {
-              console.warn('Storage save warning:', e);
-            }
-
-            const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-            createEditorWindow(editorUrl);
-
-            resolve({ success: true, jobId });
-          });
-        });
-      });
-    }
-
-    if (mode === 'full_page') {
-      return new Promise((resolve) => {
-        chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
-          if (chrome.runtime.lastError || !dataUrl) {
-            resolve({
-              success: false,
-              error: chrome.runtime.lastError?.message || 'Failed to capture full page.',
-            });
-            return;
-          }
-
-          const jobData = {
-            id: jobId,
-            type: 'full_page',
-            tabId,
-            sourceUrl: url,
-            sourceTitle: tab.title || sourceTitle || 'Full Page Capture',
-            createdAt: Date.now(),
-            status: 'editing',
-            dataUrl,
-          };
-
-          try {
-            if (chrome.storage?.session) {
-              await chrome.storage.session.set({ [jobId]: jobData });
-            }
-            await chrome.storage?.local.set({ [jobId]: jobData });
-          } catch (e) {
-            console.warn('Storage save warning:', e);
-          }
-
-          const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-          createEditorWindow(editorUrl);
-
-          resolve({ success: true, jobId });
-        });
-      });
-    }
-
-    return { success: false, error: 'Unknown screenshot mode.' };
-  }
-
-  const OFFSCREEN_DOCUMENT_PATH = "offscreen.html";
-  let creatingOffscreenDocument: Promise<void> | null = null;
-
-  async function hasOffscreenDocument(): Promise<boolean> {
-    if (typeof chrome === 'undefined' || !chrome.runtime) return false;
-    const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
-    if ('getContexts' in chrome.runtime) {
-      // @ts-ignore
-      const contexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [offscreenUrl],
-      });
-      return contexts.length > 0;
-    }
-    if (chrome.offscreen && 'hasDocument' in chrome.offscreen) {
-      // @ts-ignore
-      return await chrome.offscreen.hasDocument();
-    }
-    return false;
-  }
-
-  async function setupOffscreenDocument(): Promise<void> {
-    console.info("[Google Auth] 3. Preparing offscreen document");
-    if (await hasOffscreenDocument()) {
-      console.info("[Google Auth] 4. Offscreen document ready");
-      return;
-    }
-
-    if (creatingOffscreenDocument) {
-      await creatingOffscreenDocument;
-      console.info("[Google Auth] 4. Offscreen document ready");
-      return;
-    }
-
-    creatingOffscreenDocument = chrome.offscreen.createDocument({
-      url: OFFSCREEN_DOCUMENT_PATH,
-      reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
-      justification: 'Complete Firebase Google authentication through a hosted iframe.',
-    });
-
-    try {
-      await creatingOffscreenDocument;
-      console.info("[Google Auth] 4. Offscreen document ready");
-    } finally {
-      creatingOffscreenDocument = null;
-    }
-  }
-
-  interface OffscreenGoogleAuthResponse {
-    success: boolean;
-    idToken?: string;
-    accessToken?: string;
-    user?: {
-      uid: string;
-      email: string | null;
-      displayName: string | null;
-      photoURL: string | null;
-    };
-    error?: {
-      code?: string;
-      message?: string;
-    } | string;
-  }
-
-  async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
-    if (!chrome.offscreen) {
-      return { success: false, error: 'Offscreen API not supported' };
-    }
-
-    try {
-      await setupOffscreenDocument();
-
-      console.info("[Google Auth] 5. Sending request to offscreen document");
-
-      const response = await Promise.race([
-        new Promise<OffscreenGoogleAuthResponse | null>((resolve) => {
-          chrome.runtime.sendMessage({ type: AuthMessages.OFFSCREEN_GOOGLE_SIGN_IN, target: 'offscreen' }, (res) => {
-            if (chrome.runtime.lastError) {
-              console.error("[Google Auth] Offscreen runtime error:", chrome.runtime.lastError.message);
-              resolve({
-                success: false,
-                error: {
-                  code: 'CHROME_RUNTIME_ERROR',
-                  message: chrome.runtime.lastError.message || 'Offscreen document messaging failed.'
-                }
-              });
-            } else {
-              resolve(res || null);
-            }
-          });
-        }),
-        new Promise<null>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error("Offscreen authentication did not respond within timeout."));
-          }, 35000);
-        })
-      ]);
-
-      if (!response) {
-        throw new Error("The offscreen authentication page returned no response.");
-      }
-
-      if (!response.success) {
-        const rawErr = response.error;
-        const errMsg = typeof rawErr === 'object' ? rawErr?.message : typeof rawErr === 'string' ? rawErr : 'Google authentication failed.';
-        throw new Error(errMsg || "Google authentication failed.");
-      }
-
-      const idToken = typeof response.idToken === "string" && response.idToken.trim() ? response.idToken.trim() : undefined;
-      const accessToken = typeof response.accessToken === "string" && response.accessToken.trim() ? response.accessToken.trim() : undefined;
-
-      console.info("[Google Auth] 10. Response returned to service worker", {
-        success: response.success,
-        hasUser: Boolean(response.user),
-        hasIdToken: Boolean(idToken),
-        hasAccessToken: Boolean(accessToken)
-      });
-
-      if (idToken || accessToken) {
-        if (!auth) {
-          throw new Error("Firebase Auth instance is missing.");
         }
+      });
+    });
+  }
 
-        const credential = GoogleAuthProvider.credential(idToken, accessToken);
-        const userCredential = await signInWithCredential(auth, credential);
-        return {
-          success: true,
-          user: {
-            uid: userCredential.user.uid,
-            email: userCredential.user.email,
-            displayName: userCredential.user.displayName,
-            photoURL: userCredential.user.photoURL,
-          }
-        };
-      } else if (response.user && response.user.uid) {
-        return {
-          success: true,
-          user: response.user
-        };
-      } else {
-        throw new Error("Google authentication returned no valid ID token or access token.");
-      }
-    } catch (err: any) {
-      console.error("[Google Auth] Failure in service worker:", err);
+  if (mode === 'element') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
       return {
         success: false,
-        error: err?.message || "Google Sign-In returned invalid authentication data. Please try again."
+        error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
       };
-    } finally {
-      try {
-        if (await hasOffscreenDocument()) {
-          await chrome.offscreen.closeDocument();
-        }
-      } catch (error) {
-        console.warn("Could not close offscreen document:", error);
-      }
     }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'START_ELEMENT_SELECTION' }, (response) => {
+        if (chrome.runtime.lastError || (response && !response.success)) {
+          resolve({
+            success: false,
+            error: response?.error || 'Element selection could not start.',
+          });
+        } else {
+          resolve({ success: true, jobId });
+        }
+      });
+    });
   }
 
+  if (mode === 'video_frame') {
+    const csReady = await ensureContentScript();
+    if (!csReady) {
+      return { success: false, error: 'No supported video was detected.' };
+    }
+
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_TIMESTAMP' }, async (response) => {
+        if (chrome.runtime.lastError || !response || !response.success || !response.data) {
+          resolve({ success: false, error: 'No supported video was detected.' });
+          return;
+        }
+
+        const videoData = response.data;
+        chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
+          const finalDataUrl = videoData.frameDataUrl || dataUrl;
+          if (!finalDataUrl) {
+            resolve({ success: false, error: 'Failed to capture video frame.' });
+            return;
+          }
+
+          const jobData = {
+            id: jobId,
+            type: 'video_frame',
+            tabId,
+            sourceUrl: url,
+            sourceTitle: videoData.videoTitle || tab.title || sourceTitle,
+            createdAt: Date.now(),
+            status: 'editing',
+            dataUrl: finalDataUrl,
+            videoTimestamp: videoData.currentTime,
+            formattedVideoTime: videoData.formattedTime,
+          };
+
+          try {
+            if (chrome.storage?.session) {
+              await chrome.storage.session.set({ [jobId]: jobData });
+            }
+            await chrome.storage?.local.set({ [jobId]: jobData });
+          } catch (e) {
+            console.warn('Storage save warning:', e);
+          }
+
+          const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+          createEditorWindow(editorUrl);
+
+          resolve({ success: true, jobId });
+        });
+      });
+    });
+  }
+
+  if (mode === 'full_page') {
+    return new Promise((resolve) => {
+      chrome.tabs.captureVisibleTab(tab.windowId || null, { format: 'png' }, async (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          resolve({
+            success: false,
+            error: chrome.runtime.lastError?.message || 'Failed to capture full page.',
+          });
+          return;
+        }
+
+        const jobData = {
+          id: jobId,
+          type: 'full_page',
+          tabId,
+          sourceUrl: url,
+          sourceTitle: tab.title || sourceTitle || 'Full Page Capture',
+          createdAt: Date.now(),
+          status: 'editing',
+          dataUrl,
+        };
+
+        try {
+          if (chrome.storage?.session) {
+            await chrome.storage.session.set({ [jobId]: jobData });
+          }
+          await chrome.storage?.local.set({ [jobId]: jobData });
+        } catch (e) {
+          console.warn('Storage save warning:', e);
+        }
+
+        const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
+        createEditorWindow(editorUrl);
+
+        resolve({ success: true, jobId });
+      });
+    });
+  }
+
+  return { success: false, error: 'Unknown screenshot mode.' };
 }
 
 export {};

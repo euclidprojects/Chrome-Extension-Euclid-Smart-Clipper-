@@ -4,9 +4,13 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getCurrentExtensionOrigin } from './utils/extensionUtils';
 import { AuthMessages } from './constants/auth';
 
+console.info("[Offscreen] Script loaded", {
+  timestamp: new Date().toISOString()
+});
+
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
-  console.warn(
-    "Confirm this origin is registered in Firebase Authorized Domains:",
+  console.info(
+    "[Offscreen] Confirm this origin is registered in Firebase Authorized Domains:",
     getCurrentExtensionOrigin()
   );
 }
@@ -19,7 +23,6 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 const HOSTED_AUTH_URL = "https://euclidprojects.org/auth/chrome-extension-google.html";
 
 let iframe: HTMLIFrameElement | null = null;
-let iframeReady = false;
 let iframeReadyPromise: Promise<void> | null = null;
 
 function ensureIframeLoaded(): Promise<void> {
@@ -31,14 +34,14 @@ function ensureIframeLoaded(): Promise<void> {
     iframe.style.display = "none";
 
     iframe.addEventListener("load", () => {
-      iframeReady = true;
+      console.info("[Offscreen] Hosted iframe loaded");
       console.info("[Google Auth] 6. Hosted iframe loaded");
       resolve();
     }, { once: true });
 
     iframe.addEventListener("error", () => {
-      console.warn("[Google Auth] Hosted authentication iframe failed to load.");
-      resolve(); // Proceed so handleGoogleAuthentication can execute fallback
+      console.warn("[Offscreen] Hosted authentication iframe failed to load. Falling back to popup.");
+      resolve();
     }, { once: true });
 
     document.documentElement.appendChild(iframe);
@@ -50,7 +53,7 @@ function ensureIframeLoaded(): Promise<void> {
 // Preload iframe when offscreen loads
 ensureIframeLoaded();
 
-async function handleGoogleAuthentication(): Promise<any> {
+async function performHostedGoogleSignIn(): Promise<any> {
   await ensureIframeLoaded();
 
   return new Promise((resolve) => {
@@ -59,31 +62,39 @@ async function handleGoogleAuthentication(): Promise<any> {
     const timeoutId = setTimeout(() => {
       if (completed) return;
 
-      console.info("[Google Auth] Hosted iframe postMessage pending/timed out, opening offscreen Google popup...");
-      console.info("[Google Auth] 8. Google popup started");
+      console.info("[Offscreen] Hosted iframe postMessage pending/timed out, opening Google popup...");
+      console.info("[Hosted Auth] Starting signInWithPopup");
 
       signInWithPopup(auth, googleProvider)
-        .then((result) => {
+        .then(async (result) => {
           if (completed) return;
           completed = true;
           window.removeEventListener("message", handleIframeResponse);
-          const credential = GoogleAuthProvider.credentialFromResult(result);
+          console.info("[Hosted Auth] Authentication succeeded");
+
+          const user = result.user;
+          const idToken = await user.getIdToken();
+          
+          const plainUser = {
+            uid: user.uid,
+            displayName: user.displayName || null,
+            email: user.email || null,
+            photoURL: user.photoURL || null,
+            emailVerified: Boolean(user.emailVerified)
+          };
+
           resolve({
             success: true,
-            idToken: credential?.idToken || undefined,
-            accessToken: credential?.accessToken || undefined,
-            user: {
-              uid: result.user.uid,
-              email: result.user.email,
-              displayName: result.user.displayName,
-              photoURL: result.user.photoURL,
-            }
+            idToken,
+            user: plainUser
           });
         })
         .catch((error) => {
           if (completed) return;
           completed = true;
           window.removeEventListener("message", handleIframeResponse);
+          console.error("[Hosted Auth] Authentication failed", error);
+
           resolve({
             success: false,
             error: {
@@ -92,7 +103,7 @@ async function handleGoogleAuthentication(): Promise<any> {
             }
           });
         });
-    }, 4000);
+    }, 3500);
 
     function handleIframeResponse(event: MessageEvent) {
       try {
@@ -111,17 +122,40 @@ async function handleGoogleAuthentication(): Promise<any> {
 
         clearTimeout(timeoutId);
         window.removeEventListener("message", handleIframeResponse);
-        console.info("[Google Auth] 9. Iframe response received", data);
+        console.info("[Offscreen] Response received from iframe:", data);
 
-        resolve(data);
+        if (data.success && data.user) {
+          console.info("[Hosted Auth] Authentication succeeded");
+          const plainUser = {
+            uid: data.user.uid,
+            displayName: data.user.displayName || null,
+            email: data.user.email || null,
+            photoURL: data.user.photoURL || null,
+            emailVerified: Boolean(data.user.emailVerified)
+          };
+          resolve({
+            success: true,
+            user: plainUser,
+            idToken: data.idToken || undefined
+          });
+        } else {
+          console.error("[Hosted Auth] Authentication failed:", data.error);
+          resolve({
+            success: false,
+            error: {
+              code: data.error?.code || 'auth/hosted-error',
+              message: data.error?.message || String(data.error || 'Google authentication failed.')
+            }
+          });
+        }
       } catch (error) {
-        console.warn("[Google Auth] Ignored malformed iframe message:", error);
+        console.warn("[Offscreen] Ignored malformed iframe message:", error);
       }
     }
 
     window.addEventListener("message", handleIframeResponse);
 
-    console.info("[Google Auth] 7. Auth request sent to iframe");
+    console.info("[Offscreen] Auth request sent to hosted iframe");
     if (iframe && iframe.contentWindow) {
       try {
         iframe.contentWindow.postMessage(
@@ -129,7 +163,7 @@ async function handleGoogleAuthentication(): Promise<any> {
           '*'
         );
       } catch (e) {
-        console.warn("Could not postMessage to iframe:", e);
+        console.warn("[Offscreen] Could not postMessage to iframe:", e);
       }
     }
   });
@@ -140,30 +174,32 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     if (
       !message ||
       message.target !== 'offscreen' ||
-      (message.type !== AuthMessages.OFFSCREEN_GOOGLE_SIGN_IN &&
+      (message.type !== 'FIREBASE_GOOGLE_SIGN_IN' &&
+       message.type !== AuthMessages.FIREBASE_GOOGLE_SIGN_IN &&
+       message.type !== AuthMessages.OFFSCREEN_GOOGLE_SIGN_IN &&
        message.type !== 'OFFSCREEN_GOOGLE_SIGN_IN' &&
        message.type !== 'EUCLID_GOOGLE_SIGN_IN')
     ) {
       return false;
     }
 
-    console.info("[Google Auth] Offscreen listener triggered with message:", message);
+    console.info("[Offscreen] Auth request received", message);
 
-    handleGoogleAuthentication()
+    performHostedGoogleSignIn()
       .then((result) => {
         sendResponse(result);
       })
       .catch((error) => {
+        console.error("[Offscreen] Authentication failed in offscreen worker", error);
         sendResponse({
           success: false,
           error: {
-            code: error?.code || 'auth/offscreen-failed',
-            message: error?.message || 'Offscreen authentication failed.'
+            code: error?.code || 'auth/offscreen-error',
+            message: error?.message || String(error)
           }
         });
       });
 
-    return true; // Keep async response channel open
+    return true; // Keeps async response channel open
   });
 }
-

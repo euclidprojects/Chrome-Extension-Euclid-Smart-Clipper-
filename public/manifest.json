@@ -35,7 +35,8 @@
     "scripting",
     "downloads",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
 
   "content_security_policy": {

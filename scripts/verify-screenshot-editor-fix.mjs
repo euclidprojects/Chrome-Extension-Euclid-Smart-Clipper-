@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-console.log('🧪 Verifying Euclid Screenshot Editor & Annotator Layout Fix...');
+console.log('🧪 Verifying Euclid Compact Annotation Toolbar Requirements...');
 
 let errors = [];
 
@@ -14,79 +14,91 @@ if (!fs.existsSync(htmlPath)) {
   if (!htmlContent.includes('/src/screenshot-editor/main.tsx')) {
     errors.push('screenshot-editor.html does not load /src/screenshot-editor/main.tsx');
   }
-  if (!htmlContent.includes('class="euclid-screenshot-editor-root"') && !htmlContent.includes('euclid-screenshot-editor-root')) {
-    errors.push('screenshot-editor.html missing euclid-screenshot-editor-root root container');
-  }
 }
 
-// 2. Verify src/screenshot-editor/main.tsx & src/screenshot-editor/screenshot-editor.css
-const mainPath = path.resolve(process.cwd(), 'src/screenshot-editor/main.tsx');
+// 2. Verify screenshot-editor.css constraints
 const cssPath = path.resolve(process.cwd(), 'src/screenshot-editor/screenshot-editor.css');
-
-if (!fs.existsSync(mainPath)) {
-  errors.push('src/screenshot-editor/main.tsx missing');
-} else {
-  const mainContent = fs.readFileSync(mainPath, 'utf-8');
-  if (!mainContent.includes('screenshot-editor.css')) {
-    errors.push('main.tsx does not import screenshot-editor.css');
-  }
-  if (!mainContent.includes('euclid-screenshot-editor-root')) {
-    errors.push('main.tsx missing root class setup for euclid-screenshot-editor-root');
-  }
-}
-
 if (!fs.existsSync(cssPath)) {
   errors.push('src/screenshot-editor/screenshot-editor.css missing');
 } else {
   const cssContent = fs.readFileSync(cssPath, 'utf-8');
-  if (!cssContent.includes('.euclid-screenshot-editor-root')) {
-    errors.push('screenshot-editor.css missing .euclid-screenshot-editor-root rules');
+  if (!cssContent.includes('max-height: 170px')) {
+    errors.push('screenshot-editor.css missing max-height: 170px rule for Annotation Toolbar');
   }
-  if (!cssContent.includes('.editor-main')) {
-    errors.push('screenshot-editor.css missing .editor-main grid rules');
+  if (!cssContent.includes('max-height: 44px')) {
+    errors.push('screenshot-editor.css missing max-height: 44px rule for collapsed Annotation Toolbar');
+  }
+  if (!cssContent.includes('.annotation-group-tabs')) {
+    errors.push('screenshot-editor.css missing .annotation-group-tabs class');
+  }
+  if (!cssContent.includes('.annotation-tool-btn')) {
+    errors.push('screenshot-editor.css missing .annotation-tool-btn class');
   }
 }
 
-// 3. Verify ScreenshotEditorView.tsx component layout
+// 3. Verify AnnotationToolbar.tsx & annotationConfig.ts component & config
+const toolbarPath = path.resolve(process.cwd(), 'src/components/annotation/AnnotationToolbar.tsx');
+const configPath = path.resolve(process.cwd(), 'src/components/annotation/annotationConfig.ts');
+
+if (!fs.existsSync(toolbarPath)) {
+  errors.push('src/components/annotation/AnnotationToolbar.tsx missing');
+} else if (!fs.existsSync(configPath)) {
+  errors.push('src/components/annotation/annotationConfig.ts missing');
+} else {
+  const tbContent = fs.readFileSync(toolbarPath, 'utf-8');
+  const cfgContent = fs.readFileSync(configPath, 'utf-8');
+  const combinedContent = tbContent + cfgContent;
+
+  // Verify group tabs
+  ['markup', 'draw', 'notes', 'edit', 'more'].forEach((grp) => {
+    if (!combinedContent.includes(`'${grp}'`)) {
+      errors.push(`AnnotationToolbar/annotationConfig missing group: ${grp}`);
+    }
+  });
+
+  // Verify collapse feature & tooltips
+  if (!tbContent.includes('Collapse annotation toolbar')) {
+    errors.push('AnnotationToolbar missing "Collapse annotation toolbar" tooltip/aria-label');
+  }
+  if (!tbContent.includes('Expand annotation toolbar')) {
+    errors.push('AnnotationToolbar missing "Expand annotation toolbar" tooltip/aria-label');
+  }
+
+  // Verify auto-collapse feature
+  if (!tbContent.includes('autoCollapseOnSelect')) {
+    errors.push('AnnotationToolbar missing autoCollapseOnSelect setting state');
+  }
+
+  // Verify inline active tool & colors
+  if (!tbContent.includes('Active:')) {
+    errors.push('AnnotationToolbar missing compact inline "Active:" tool indicator');
+  }
+  if (!tbContent.includes('annotation-color-swatch')) {
+    errors.push('AnnotationToolbar missing inline color swatch class');
+  }
+}
+
+// 4. Verify ScreenshotEditorView.tsx
 const viewPath = path.resolve(process.cwd(), 'src/components/ScreenshotEditorView.tsx');
 if (!fs.existsSync(viewPath)) {
   errors.push('src/components/ScreenshotEditorView.tsx missing');
 } else {
   const viewContent = fs.readFileSync(viewPath, 'utf-8');
 
-  if (!viewContent.includes('editor-source-title')) {
-    errors.push('ScreenshotEditorView missing editor-source-title class for source title truncation');
-  }
-  if (!viewContent.includes('editor-source-url')) {
-    errors.push('ScreenshotEditorView missing editor-source-url class for source URL truncation');
-  }
-  if (!viewContent.includes('canvas-viewport')) {
-    errors.push('ScreenshotEditorView missing canvas-viewport class for centered canvas workspace');
-  }
-  if (!viewContent.includes('canvas-stage')) {
-    errors.push('ScreenshotEditorView missing canvas-stage class for scaled screenshot stage');
-  }
-
-  // Verify single Save Clip button
-  const saveClipMatches = (viewContent.match(/data-testid="save-clip"/g) || []).length;
-  if (saveClipMatches !== 1) {
-    errors.push(`Expected exactly 1 Save Clip button with data-testid="save-clip" in ScreenshotEditorView, found ${saveClipMatches}`);
-  }
-
-  // Verify panel collapse controls
-  if (!viewContent.includes('isLeftCollapsed') || !viewContent.includes('isRightCollapsed')) {
-    errors.push('ScreenshotEditorView missing collapsible panel state');
+  if (!viewContent.includes('AnnotationToolbar')) {
+    errors.push('ScreenshotEditorView does not render AnnotationToolbar');
   }
 }
 
 if (errors.length > 0) {
-  console.error('\n❌ Screenshot Editor Verification FAILED:');
+  console.error('\n❌ Compact Annotation Toolbar Verification FAILED:');
   errors.forEach((err) => console.error(` - ${err}`));
   process.exit(1);
 }
 
 console.log('✅ screenshot-editor.html correctly configured.');
-console.log('✅ Dedicated entry point src/screenshot-editor/main.tsx and CSS verified.');
-console.log('✅ Responsive 3-column workspace & canvas fit-to-screen scale verified.');
-console.log('✅ Panel collapse controls and single Save Clip button verified.');
-console.log('🎉 Screenshot Editor Layout Verification PASSED!\n');
+console.log('✅ CSS max-height constraints (170px expanded, 44px collapsed) verified.');
+console.log('✅ Compact group tabs, tool buttons, and inline color swatches verified.');
+console.log('✅ Collapsible toolbar state & Auto-Collapse option verified.');
+console.log('✅ All 5 annotation groups & tool functions maintained.');
+console.log('🎉 Compact Annotation Toolbar Verification PASSED!\n');

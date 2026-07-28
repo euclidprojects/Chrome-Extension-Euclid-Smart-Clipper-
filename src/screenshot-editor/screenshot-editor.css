@@ -68,9 +68,108 @@ body,
 
 .annotation-group-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(90px, 1fr));
-  gap: 6px;
-  width: 100%;
+  grid-template-columns: repeat(5, minmax(70px, 1fr));
+  gap: 4px;
+  width: auto;
+}
+
+/* Compact Annotation Toolbar Sizing & Layout */
+.annotation-toolbar {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
+  background: #080d12;
+  border-bottom: 1px solid rgba(100, 255, 190, 0.2);
+  transition: max-height 0.2s ease-in-out, padding 0.2s ease-in-out;
+  max-height: 170px;
+}
+
+.annotation-toolbar.is-collapsed {
+  padding: 5px 8px;
+  max-height: 44px;
+}
+
+.annotation-toolbar-header {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.annotation-toolbar-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.annotation-toolbar.is-collapsed .annotation-toolbar-body {
+  display: none;
+}
+
+.annotation-group-tab {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.annotation-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.annotation-tool-btn {
+  height: 34px;
+  min-width: 80px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.annotation-quick-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 11px;
+}
+
+.annotation-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.annotation-color-swatch:hover {
+  transform: scale(1.1);
 }
 
 .editor-tool-settings {

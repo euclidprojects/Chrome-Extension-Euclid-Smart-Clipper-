@@ -561,7 +561,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
       </header>
 
       {/* ROW 2: ANNOTATION TOOLBAR */}
-      <div className="p-2.5 bg-[#0D121A] border-b border-slate-800/80 z-20 shrink-0">
+      <div className="px-3 py-1.5 bg-[#0D121A] border-b border-slate-800/80 z-20 shrink-0">
         <AnnotationToolbar
           activeTool={activeTool}
           onSelectTool={(t) => setActiveTool(t)}
@@ -574,6 +574,8 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
           selectedColor={selectedColor}
           onSelectColor={(c) => setSelectedColor(c)}
           annotationsCount={annotations.length}
+          onClearAll={() => setAnnotations([])}
+          onResetZoom={handleFitToScreen}
         />
       </div>
 

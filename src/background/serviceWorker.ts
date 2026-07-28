@@ -100,6 +100,33 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     });
   }
 
+  // Helper to open screenshot editor in responsive desktop window
+  const createEditorWindow = async (editorUrl: string) => {
+    let targetWidth = 1200;
+    let targetHeight = 850;
+
+    try {
+      if (chrome.system?.display) {
+        const displays = await chrome.system.display.getInfo();
+        const primary = displays.find((d) => d.isPrimary) || displays[0];
+        if (primary && primary.workArea) {
+          targetWidth = Math.max(760, Math.min(1200, primary.workArea.width - 40));
+          targetHeight = Math.max(560, Math.min(850, primary.workArea.height - 40));
+        }
+      }
+    } catch (e) {
+      // Fallback default
+    }
+
+    return chrome.windows.create({
+      url: editorUrl,
+      type: 'popup',
+      width: targetWidth,
+      height: targetHeight,
+      focused: true,
+    });
+  };
+
   // Background Message Listener
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'PING_SERVICE_WORKER') {
@@ -190,13 +217,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         }
 
         const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-        chrome.windows.create({
-          url: editorUrl,
-          type: 'popup',
-          width: 1100,
-          height: 750,
-          focused: true,
-        });
+        createEditorWindow(editorUrl);
       });
       return true;
     }
@@ -227,13 +248,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         }
 
         const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-        chrome.windows.create({
-          url: editorUrl,
-          type: 'popup',
-          width: 1100,
-          height: 750,
-          focused: true,
-        });
+        createEditorWindow(editorUrl);
 
         sendResponse({ success: true, data: { jobId } });
       });
@@ -329,13 +344,7 @@ async function handleStartScreenshotCapture(payload: {
         }
 
         const editorUrl = chrome.runtime.getURL(`screenshot-editor.html?jobId=${jobId}`);
-        chrome.windows.create({
-          url: editorUrl,
-          type: 'popup',
-          width: 1100,
-          height: 750,
-          focused: true,
-        });
+        createEditorWindow(editorUrl);
 
         resolve({ success: true, jobId });
       });

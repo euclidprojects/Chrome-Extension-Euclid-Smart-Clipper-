@@ -197,5 +197,7 @@ const EditorApp: React.FC = () => {
 
 const rootEl = document.getElementById('root');
 if (rootEl) {
+  rootEl.classList.remove('euclid-popup-root');
+  rootEl.classList.add('euclid-screenshot-editor-root', 'is-full-workspace');
   createRoot(rootEl).render(<EditorApp />);
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Sparkles,
   Camera,
@@ -21,6 +21,22 @@ import {
   Layers,
   Crop,
   Video,
+  Sliders,
+  Palette,
+  Type,
+  FileText,
+  Check,
+  Trash2,
+  Undo,
+  Redo,
+  Info,
+  Tag as TagIcon,
+  Folder as FolderIcon,
+  Maximize,
+  HelpCircle,
+  Clock,
+  Globe,
+  FileCheck,
 } from 'lucide-react';
 import {
   CaptureJob,
@@ -31,7 +47,11 @@ import {
   EuclidAnnotation,
 } from '../types';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
-import { AnnotationToolId } from './annotation/annotationConfig';
+import {
+  AnnotationToolId,
+  ALL_ANNOTATION_TOOLS,
+  PRESET_COLORS,
+} from './annotation/annotationConfig';
 
 interface ScreenshotEditorViewProps {
   job: CaptureJob;
@@ -63,27 +83,35 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Loaded Image
+  // Loaded Image & Image Readiness
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
   const [imgDimensions, setImgDimensions] = useState({ width: 1280, height: 720 });
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
 
   // Zoom & Pan state
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isFitToScreen, setIsFitToScreen] = useState(true);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
-  // Active Tool state
+  // Active Tool & Contextual Settings
   const [activeTool, setActiveTool] = useState<AnnotationToolId>('highlight');
   const [selectedColor, setSelectedColor] = useState('#FDE047');
+  const [strokeWidth, setStrokeWidth] = useState<number>(4);
+  const [fontSize, setFontSize] = useState<number>(14);
+  const [opacity, setOpacity] = useState<number>(0.8);
+  const [privacyStrength, setPrivacyStrength] = useState<'low' | 'medium' | 'high'>('medium');
   const [areAnnotationsVisible, setAreAnnotationsVisible] = useState(true);
 
-  // Drawing stroke state
+  // Drawing & History state
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [annotations, setAnnotations] = useState<EuclidAnnotation[]>(job.annotations || []);
   const [history, setHistory] = useState<EuclidAnnotation[][]>([job.annotations || []]);
   const [historyIdx, setHistoryIdx] = useState(0);
 
-  // Form State
+  // Destination & Form State
   const [noteTitle, setNoteTitle] = useState(job.sourceTitle || 'Captured Screenshot');
   const [userRemark, setUserRemark] = useState(job.userRemark || '');
   const [selectedNotebookId, setSelectedNotebookId] = useState<string>(
@@ -96,7 +124,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
   const [destMode, setDestMode] = useState<'create_new' | 'add_to_existing'>('create_new');
   const [targetNoteId, setTargetNoteId] = useState('');
 
-  // Inline inputs
+  // Inline Creation State
   const [showNewNotebookInput, setShowNewNotebookInput] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
@@ -111,20 +139,20 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Load image from job dataUrl
+  // Load screenshot image and process crops if selectionRect exists
   useEffect(() => {
     if (!job.dataUrl) return;
 
+    setIsImageLoaded(false);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      // If selectionRect is provided and image needs cropping
+      // If selectionRect is provided and valid, crop the selection area
       if (job.selectionRect && job.selectionRect.width > 10 && job.selectionRect.height > 10 && !job.cropData) {
         const cropCanvas = document.createElement('canvas');
         const rect = job.selectionRect;
         const dpr = rect.devicePixelRatio || window.devicePixelRatio || 1;
 
-        // Clip source coordinates
         const sx = rect.viewportX !== undefined ? rect.viewportX * dpr : rect.x;
         const sy = rect.viewportY !== undefined ? rect.viewportY * dpr : rect.y;
         const sw = rect.viewportWidth !== undefined ? rect.viewportWidth * dpr : rect.width;
@@ -139,7 +167,8 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
           const croppedImg = new Image();
           croppedImg.onload = () => {
             setImageObj(croppedImg);
-            setImgDimensions({ width: sw, height: sh });
+            setImgDimensions({ width: Math.round(sw), height: Math.round(sh) });
+            setIsImageLoaded(true);
           };
           croppedImg.src = cropCanvas.toDataURL('image/png');
           return;
@@ -148,12 +177,47 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
 
       setImageObj(img);
       setImgDimensions({ width: img.naturalWidth || 1280, height: img.naturalHeight || 720 });
+      setIsImageLoaded(true);
     };
     img.src = job.dataUrl;
   }, [job.dataUrl, job.selectionRect]);
 
+  // Fit to screen calculation based on viewport dimensions
+  const handleFitToScreen = useCallback(() => {
+    if (!containerRef.current || !imgDimensions.width || !imgDimensions.height) return;
+    const cw = containerRef.current.clientWidth - 64;
+    const ch = containerRef.current.clientHeight - 64;
+    if (cw > 0 && ch > 0) {
+      const scaleX = cw / imgDimensions.width;
+      const scaleY = ch / imgDimensions.height;
+      const fitScale = Math.min(scaleX, scaleY, 1.0);
+      setZoomLevel(Math.max(0.1, Math.min(fitScale, 5.0)));
+      setPanOffset({ x: 0, y: 0 });
+      setIsFitToScreen(true);
+    }
+  }, [imgDimensions]);
+
+  // Auto-fit on initial load & container resize
+  useEffect(() => {
+    if (isImageLoaded) {
+      handleFitToScreen();
+    }
+  }, [isImageLoaded, handleFitToScreen]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (isFitToScreen) {
+        handleFitToScreen();
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isFitToScreen, handleFitToScreen]);
+
   // Redraw Canvas
-  const redrawCanvas = () => {
+  const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !imageObj) return;
     const ctx = canvas.getContext('2d');
@@ -162,30 +226,30 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     canvas.width = imgDimensions.width;
     canvas.height = imgDimensions.height;
 
-    // Draw background screenshot image
+    // Draw background image
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(imageObj, 0, 0, canvas.width, canvas.height);
 
     if (!areAnnotationsVisible) return;
 
-    // Render annotations
+    // Draw annotations
     annotations.forEach((ann) => {
       ctx.save();
       if (ann.type === 'highlight') {
         ctx.fillStyle = ann.color || '#FDE047';
-        ctx.globalAlpha = 0.4;
+        ctx.globalAlpha = opacity;
         if (ann.shapeData) {
           ctx.fillRect(ann.shapeData.x, ann.shapeData.y, ann.shapeData.w, ann.shapeData.h);
         }
       } else if (ann.type === 'rectangle') {
         ctx.strokeStyle = ann.color || '#FDE047';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = strokeWidth;
         if (ann.shapeData) {
           ctx.strokeRect(ann.shapeData.x, ann.shapeData.y, ann.shapeData.w, ann.shapeData.h);
         }
       } else if (ann.type === 'circle') {
         ctx.strokeStyle = ann.color || '#FDE047';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = strokeWidth;
         if (ann.shapeData) {
           ctx.beginPath();
           ctx.ellipse(
@@ -201,7 +265,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
         }
       } else if (ann.type === 'arrow' || ann.type === 'line') {
         ctx.strokeStyle = ann.color || '#FDE047';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = strokeWidth;
         if (ann.shapeData) {
           ctx.beginPath();
           ctx.moveTo(ann.shapeData.x, ann.shapeData.y);
@@ -215,7 +279,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
         }
       } else if (ann.type === 'freehand' && ann.points && ann.points.length > 1) {
         ctx.strokeStyle = ann.color || '#FDE047';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = strokeWidth;
         ctx.beginPath();
         ctx.moveTo(ann.points[0].x, ann.points[0].y);
         for (let i = 1; i < ann.points.length; i++) {
@@ -225,13 +289,13 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
       }
       ctx.restore();
     });
-  };
+  }, [imageObj, imgDimensions, annotations, areAnnotationsVisible, opacity, strokeWidth]);
 
   useEffect(() => {
     redrawCanvas();
-  }, [imageObj, imgDimensions, annotations, areAnnotationsVisible]);
+  }, [redrawCanvas]);
 
-  // Push new annotation
+  // Add Annotation to state and history
   const addAnnotation = (newAnn: EuclidAnnotation) => {
     const updated = [...annotations, newAnn];
     setAnnotations(updated);
@@ -241,8 +305,9 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     setHistoryIdx(newHist.length - 1);
   };
 
-  // Canvas Mouse Events
+  // Mouse / Drawing Events on Canvas
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (activeTool === 'none') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -294,7 +359,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     addAnnotation(newAnn);
   };
 
-  // Undo & Redo
+  // Undo / Redo
   const handleUndo = () => {
     if (historyIdx > 0) {
       const prevIdx = historyIdx - 1;
@@ -311,7 +376,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     }
   };
 
-  // Download & Copy Image
+  // Download / Copy
   const handleDownloadImage = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -332,7 +397,7 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     });
   };
 
-  // Main Save Clip Handler
+  // Primary Save Action Handler
   const handleSaveClip = async () => {
     setIsSaving(true);
     setSaveError(null);
@@ -409,150 +474,264 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     }
   };
 
+  const currentToolDef = ALL_ANNOTATION_TOOLS.find((t) => t.id === activeTool);
   const filteredFolders = folders.filter((f) => !f.notebookId || f.notebookId === selectedNotebookId);
 
   return (
-    <div className="flex flex-col w-screen h-screen bg-[#0A0D12] text-slate-100 overflow-hidden font-sans select-none">
+    <div className="screenshot-editor w-screen h-screen bg-[#0A0D12] text-slate-100 overflow-hidden font-sans select-none grid grid-rows-[auto_auto_minmax(0,1fr)_auto]">
       
-      {/* 1. TOP HEADER BAR */}
-      <header className="h-[52px] px-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-xl z-30">
-        <div className="flex items-center gap-3 min-w-0">
+      {/* ROW 1: COMPACT FULL-WIDTH HEADER */}
+      <header className="h-[52px] px-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-xl z-30 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 border border-amber-300/60 shadow-[0_0_12px_rgba(251,191,36,0.3)] flex items-center justify-center shrink-0">
             <Sparkles className="w-4.5 h-4.5 text-amber-300" />
           </div>
-          <div className="min-w-0">
-            <h1 className="font-extrabold text-[15px] text-white tracking-tight flex items-center gap-2 leading-tight">
-              <span className="truncate">{job.sourceTitle || 'Captured Page'}</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-950 uppercase tracking-wider shrink-0">
+          
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="font-extrabold text-[14px] text-white tracking-tight truncate" title={job.sourceTitle || 'Captured Screenshot'}>
+                {job.sourceTitle || 'Captured Screenshot'}
+              </h1>
+              
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-950 uppercase tracking-wider shrink-0 shadow-sm" title={`Capture Mode: ${getJobModeBadge()}`}>
                 {getJobModeBadge()}
               </span>
-            </h1>
-            <p className="text-[11px] text-emerald-300 font-mono truncate">
-              {job.sourceUrl} • {imgDimensions.width} × {imgDimensions.height} px
-            </p>
+
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-900/80 text-emerald-300 border border-emerald-500/40 shrink-0">
+                {imgDimensions.width} × {imgDimensions.height} px
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-emerald-300/90 font-mono min-w-0">
+              <span className="truncate" title={job.sourceUrl}>{job.sourceUrl || 'https://notes.app.euclidprojects.org'}</span>
+              <span className="shrink-0 text-emerald-600">•</span>
+              <span className="shrink-0 text-slate-400">{new Date(job.createdAt || Date.now()).toLocaleTimeString()}</span>
+            </div>
           </div>
         </div>
 
-        {/* Header Right Actions & Zoom Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center bg-black/40 border border-emerald-700/50 rounded-xl p-1 gap-1 text-[11px] font-bold">
-            <button
-              onClick={() => setZoomLevel((z) => Math.max(0.4, z - 0.15))}
-              className="p-1 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50"
-              title="Zoom Out"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="w-12 text-center text-amber-300 font-mono">{Math.round(zoomLevel * 100)}%</span>
-            <button
-              onClick={() => setZoomLevel((z) => Math.min(3, z + 0.15))}
-              className="p-1 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setZoomLevel(1)}
-              className="px-1.5 py-0.5 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50 text-[10px]"
-              title="Actual Size 100%"
-            >
-              100%
-            </button>
+        {/* Header Right Controls */}
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-[11px] font-bold text-emerald-300">
+            <FileCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Unsaved</span>
           </div>
-
-          {onRetake && (
-            <button
-              type="button"
-              onClick={onRetake}
-              className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
-              <span>Retake</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleDownloadImage}
-            className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Download PNG"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Download</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopyImage}
-            className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Copy Image to Clipboard"
-          >
-            <Copy className="w-3.5 h-3.5 text-amber-300" />
-            <span>Copy</span>
-          </button>
 
           <button
             type="button"
             onClick={() => window.close()}
-            className="p-1.5 rounded-xl text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer ml-1"
-            title="Close Window"
+            className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+            title="Close Editor Window"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      {/* 2. MAIN SPLIT BODY: EDITOR WORKSPACE & RIGHT CONTROL SIDEBAR */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* ROW 2: ANNOTATION TOOLBAR */}
+      <div className="p-2.5 bg-[#0D121A] border-b border-slate-800/80 z-20 shrink-0">
+        <AnnotationToolbar
+          activeTool={activeTool}
+          onSelectTool={(t) => setActiveTool(t)}
+          areAnnotationsVisible={areAnnotationsVisible}
+          onToggleVisibility={(v) => setAreAnnotationsVisible(v)}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onDeleteSelected={() => setAnnotations([])}
+          onExitMode={() => setActiveTool('none')}
+          selectedColor={selectedColor}
+          onSelectColor={(c) => setSelectedColor(c)}
+          annotationsCount={annotations.length}
+        />
+      </div>
+
+      {/* ROW 3: MAIN 3-COLUMN WORKSPACE */}
+      <div className="editor-main min-height-0 grid grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,300px)] overflow-hidden">
         
-        {/* LEFT WORKSPACE: CANVAS & ANNOTATION TOOLBAR */}
-        <div className="flex-1 flex flex-col bg-[#090C10] overflow-hidden relative">
-          
-          {/* TOP ANNOTATION TOOLBAR (23 TOOLS) */}
-          <div className="p-3 bg-[#0D121A] border-b border-slate-800/80 z-10 shrink-0">
-            <AnnotationToolbar
-              activeTool={activeTool}
-              onSelectTool={(t) => setActiveTool(t)}
-              areAnnotationsVisible={areAnnotationsVisible}
-              onToggleVisibility={(v) => setAreAnnotationsVisible(v)}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-              onDeleteSelected={() => setAnnotations([])}
-              onExitMode={() => setActiveTool('none')}
-              selectedColor={selectedColor}
-              onSelectColor={(c) => setSelectedColor(c)}
-              annotationsCount={annotations.length}
-            />
+        {/* COLUMN 1: LEFT TOOL SETTINGS PANEL */}
+        <div className="bg-[#0D121A] border-r border-slate-800/80 p-3.5 flex flex-col gap-3 overflow-y-auto shrink-0">
+          <div className="flex items-center gap-2 text-[12px] font-extrabold text-amber-300 uppercase tracking-wider pb-2 border-b border-slate-800">
+            <Sliders className="w-4 h-4 text-emerald-400" />
+            <span>Tool Settings</span>
           </div>
 
-          {/* INTERACTIVE CANVAS CONTAINER */}
-          <div
-            ref={containerRef}
-            className="flex-1 overflow-auto p-6 flex items-center justify-center bg-radial from-slate-900/60 to-black"
-          >
+          {/* Active Tool Info Box */}
+          <div className="bg-[#05080c] p-2.5 rounded-xl border border-slate-800 space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+              <span>Active Tool</span>
+              {currentToolDef?.shortcut && (
+                <kbd className="px-1.5 py-0.5 bg-slate-900 text-amber-300 text-[9px] font-mono rounded border border-slate-700">
+                  {currentToolDef.shortcut}
+                </kbd>
+              )}
+            </div>
+            <p className="font-extrabold text-[13px] text-amber-300 flex items-center gap-1.5 pt-0.5">
+              {currentToolDef ? (
+                <>
+                  <currentToolDef.icon className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{currentToolDef.label}</span>
+                </>
+              ) : (
+                <span className="italic text-slate-500">None selected</span>
+              )}
+            </p>
+            {currentToolDef?.tooltip && (
+              <p className="text-[11px] text-slate-400 pt-1 leading-snug">{currentToolDef.tooltip}</p>
+            )}
+          </div>
+
+          {/* Color Picker Swatches */}
+          <div className="space-y-2 bg-[#05080c] p-2.5 rounded-xl border border-slate-800">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+              <span className="flex items-center gap-1">
+                <Palette className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Color</span>
+              </span>
+              <span className="text-amber-300 font-mono text-[10px]">
+                {PRESET_COLORS.find((c) => c.hex === selectedColor)?.name || selectedColor}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-1.5 p-1 bg-[#090d12] rounded-lg border border-slate-800">
+              {PRESET_COLORS.map((color) => {
+                const isSel = selectedColor === color.hex;
+                return (
+                  <button
+                    key={color.hex}
+                    type="button"
+                    title={color.label}
+                    onClick={() => setSelectedColor(color.hex)}
+                    style={{ backgroundColor: color.hex }}
+                    className={`h-7 rounded-md border transition-all cursor-pointer flex items-center justify-center ${
+                      isSel
+                        ? 'border-white scale-105 ring-2 ring-emerald-500 shadow-sm'
+                        : 'border-transparent opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    {isSel && <Check className="w-3.5 h-3.5 text-slate-950 stroke-[3]" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Stroke Width Controls */}
+          {['freehand', 'line', 'arrow', 'rectangle', 'circle'].includes(activeTool) && (
+            <div className="space-y-1.5 bg-[#05080c] p-2.5 rounded-xl border border-slate-800 text-[11px]">
+              <span className="font-bold text-slate-300 block">Stroke Width</span>
+              <div className="grid grid-cols-4 gap-1">
+                {[2, 4, 8, 12].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => setStrokeWidth(w)}
+                    className={`py-1 rounded font-mono font-bold text-[10px] border cursor-pointer ${
+                      strokeWidth === w
+                        ? 'bg-emerald-600 text-white border-amber-300'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {w}px
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Font Size Controls */}
+          {['text_box', 'sticky_note', 'comment'].includes(activeTool) && (
+            <div className="space-y-1.5 bg-[#05080c] p-2.5 rounded-xl border border-slate-800 text-[11px]">
+              <span className="font-bold text-slate-300 block">Font Size</span>
+              <div className="grid grid-cols-3 gap-1">
+                {[12, 14, 18].map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setFontSize(s)}
+                    className={`py-1 rounded font-mono font-bold text-[10px] border cursor-pointer ${
+                      fontSize === s
+                        ? 'bg-emerald-600 text-white border-amber-300'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {s}px
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Privacy Strength */}
+          {['blur', 'pixelate'].includes(activeTool) && (
+            <div className="space-y-1.5 bg-[#05080c] p-2.5 rounded-xl border border-slate-800 text-[11px]">
+              <span className="font-bold text-slate-300 block">Blur Strength</span>
+              <div className="grid grid-cols-3 gap-1">
+                {(['low', 'medium', 'high'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setPrivacyStrength(st)}
+                    className={`py-1 rounded font-bold text-[10px] capitalize border cursor-pointer ${
+                      privacyStrength === st
+                        ? 'bg-emerald-600 text-white border-amber-300'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Keyboard Shortcuts Hint */}
+          <div className="mt-auto pt-2 bg-[#05080c] p-2.5 rounded-xl border border-slate-800 space-y-1 text-[10px] text-slate-400">
+            <div className="font-bold text-emerald-400 flex items-center gap-1">
+              <HelpCircle className="w-3 h-3" />
+              <span>Canvas Controls</span>
+            </div>
+            <p>• Ctrl + Wheel to Zoom</p>
+            <p>• Hold Space to Pan</p>
+            <p>• Esc to clear tool selection</p>
+          </div>
+        </div>
+
+        {/* COLUMN 2: CENTER LARGE SCREENSHOT CANVAS */}
+        <div
+          ref={containerRef}
+          className="canvas-viewport flex-1 relative min-w-0 min-height-0 overflow-auto flex items-center justify-center bg-[#0b1017] p-6"
+        >
+          {!isImageLoaded ? (
+            <div className="flex flex-col items-center justify-center gap-3">
+              <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+              <p className="font-bold text-[13px] text-amber-300">Decoding screenshot workspace…</p>
+            </div>
+          ) : (
             <div
-              className="transition-transform duration-100 ease-out shadow-[0_0_40px_rgba(0,0,0,0.8)] border border-slate-800 rounded-lg overflow-hidden bg-black"
-              style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}
+              className="canvas-stage relative flex-none transition-transform duration-75 ease-out shadow-[0_0_50px_rgba(0,0,0,0.85)] rounded-lg border border-slate-800/80 bg-black overflow-hidden"
+              style={{
+                transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
+                transformOrigin: 'center center',
+              }}
             >
               <canvas
                 ref={canvasRef}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
-                className="cursor-crosshair block max-w-none"
+                className="block max-w-none max-h-none select-none cursor-crosshair"
               />
             </div>
-          </div>
+          )}
         </div>
 
-        {/* RIGHT SIDEBAR: DESTINATION & SAVE CLIP PANEL */}
-        <div className="w-[380px] bg-[#0E131B] border-l border-slate-800/80 flex flex-col shrink-0 overflow-y-auto divide-y divide-slate-800/80">
+        {/* COLUMN 3: RIGHT CLIP DETAILS & DESTINATION PANEL */}
+        <div className="bg-[#0D121A] border-l border-slate-800/80 flex flex-col overflow-y-auto shrink-0 divide-y divide-slate-800/80">
           
-          {/* DESTINATION CONTROLS */}
           <div className="p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[12px] font-extrabold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                 <BookOpen className="w-4 h-4 text-emerald-400" />
-                <span>Destination Controls</span>
+                <span>Clip Details</span>
               </span>
 
               <div className="flex items-center gap-1 bg-[#060A0F] p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
@@ -782,78 +961,136 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
             )}
           </div>
 
-          {/* SINGLE PRIMARY SAVE CLIP BUTTON */}
-          <div className="p-4 bg-[#0A0D12] border-t border-slate-800/80 sticky bottom-0 mt-auto">
-            {savedNoteId ? (
-              <div className="space-y-2.5">
-                <div className="bg-emerald-950/90 border border-emerald-500/80 p-3 rounded-2xl text-center font-extrabold text-[14px] text-amber-300 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                  <CheckCircle2 className="w-5 h-5 text-amber-400" />
-                  <span>Clip Saved to Euclid Smart Notes</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[12px] font-bold">
-                  <button
-                    onClick={() => onOpenSmartNotesNote(savedNoteId)}
-                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all col-span-2 cursor-pointer"
-                  >
-                    <span>Open in Euclid Smart Notes</span>
-                    <ExternalLink className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`https://notes.app.euclidprojects.org/note/${savedNoteId}`);
-                      setCopiedLink(true);
-                      setTimeout(() => setCopiedLink(false), 2000);
-                    }}
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center justify-center gap-1 col-span-1 text-[11px] cursor-pointer"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => window.close()}
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center justify-center gap-1 col-span-1 text-[11px] cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    <span>Close Editor</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div>
-                <button
-                  type="button"
-                  onClick={handleSaveClip}
-                  disabled={isSaving}
-                  className="w-full h-[48px] bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-[15px] rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] border border-amber-300/40 flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
-                >
-                  {isSaving ? (
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4.5 h-4.5 animate-spin text-amber-300" />
-                      <span className="text-amber-200 font-bold">{saveStepMessage || 'Saving clip…'}</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5 text-amber-300 fill-amber-300/40" />
-                      <span>Save Clip</span>
-                    </>
-                  )}
-                </button>
-
-                {saveError && (
-                  <div className="mt-2 p-2.5 bg-red-950/80 border border-red-500/60 rounded-xl text-[11px] text-red-200 flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{saveError}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
         </div>
       </div>
+
+      {/* ROW 4: STICKY BOTTOM ACTION BAR */}
+      <footer className="h-[52px] px-4 bg-[#0D121A] border-t border-slate-800/80 flex items-center justify-between shrink-0 z-30">
+        {/* Left: Zoom & View Controls */}
+        <div className="flex items-center gap-1 bg-[#060A0F] border border-slate-800 rounded-xl p-1 text-[11px] font-bold">
+          <button
+            onClick={() => {
+              setZoomLevel((z) => Math.max(0.1, z - 0.15));
+              setIsFitToScreen(false);
+            }}
+            className="p-1 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50 transition-colors"
+            title="Zoom Out (-)"
+          >
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <span className="w-12 text-center text-amber-300 font-mono text-[11px]">
+            {Math.round(zoomLevel * 100)}%
+          </span>
+          <button
+            onClick={() => {
+              setZoomLevel((z) => Math.min(5.0, z + 0.15));
+              setIsFitToScreen(false);
+            }}
+            className="p-1 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50 transition-colors"
+            title="Zoom In (+)"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+          
+          <div className="w-[1px] h-4 bg-slate-800 mx-0.5" />
+
+          <button
+            onClick={handleFitToScreen}
+            className="px-2 py-0.5 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50 transition-colors text-[10px]"
+            title="Fit to Screen"
+          >
+            Fit Screen
+          </button>
+
+          <button
+            onClick={() => {
+              setZoomLevel(1.0);
+              setPanOffset({ x: 0, y: 0 });
+              setIsFitToScreen(false);
+            }}
+            className="px-2 py-0.5 rounded text-slate-300 hover:text-white hover:bg-emerald-800/50 transition-colors text-[10px]"
+            title="Actual Size 100%"
+          >
+            100%
+          </button>
+        </div>
+
+        {/* Middle: Actions */}
+        <div className="flex items-center gap-2">
+          {onRetake && (
+            <button
+              type="button"
+              onClick={onRetake}
+              className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
+              <span>Retake</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleDownloadImage}
+            className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Download PNG"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Download</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopyImage}
+            className="h-8 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-[12px] flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Copy Image to Clipboard"
+          >
+            <Copy className="w-3.5 h-3.5 text-amber-300" />
+            <span>Copy Image</span>
+          </button>
+        </div>
+
+        {/* Right: Cancel & EXACTLY ONE Primary Save Clip Button */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.close()}
+            className="h-9 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[12px] transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+
+          {savedNoteId ? (
+            <button
+              type="button"
+              onClick={() => onOpenSmartNotesNote(savedNoteId)}
+              className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-[12px] flex items-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <span>Open in Euclid Smart Notes</span>
+              <ExternalLink className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="save-clip"
+              onClick={handleSaveClip}
+              disabled={isSaving}
+              className="h-9 px-5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-[13px] rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] border border-amber-300/40 flex items-center gap-2 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
+                  <span className="text-amber-200 font-bold">{saveStepMessage || 'Saving clip…'}</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-300 fill-amber-300/40" />
+                  <span>Save Clip</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </footer>
     </div>
   );
 };

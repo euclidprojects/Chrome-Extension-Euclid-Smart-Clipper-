@@ -1,4 +1,4 @@
-import { firebaseApp, firebaseAuth, firestore, firebaseStorage, firebaseConfig } from './firebase';
+import { firebaseApp, auth, firestore, firebaseStorage, firebaseConfig } from '../lib/firebase';
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -16,7 +16,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export { firebaseConfig };
 export const app = firebaseApp;
-export const auth = firebaseAuth;
+export { auth };
 export const db = firestore;
 export const storage = firebaseStorage;
 
@@ -48,5 +48,3 @@ export {
   getDownloadURL,
 };
 export type { FirebaseUser };
-
-

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Mail,
@@ -7,15 +7,11 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
-  ShieldCheck,
   RefreshCw,
-  ExternalLink,
-  KeyRound,
   ArrowLeft,
-  BookOpen,
 } from 'lucide-react';
 import { EuclidUser } from '../types';
-import { firebaseAuthService } from '../services/firebaseService';
+import { authService, AuthStatus } from '../services/authService';
 
 interface AuthScreenProps {
   onAuthenticated: (user: EuclidUser) => void;
@@ -40,6 +36,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [showLegalModal, setShowLegalModal] = useState<'privacy' | 'terms' | null>(null);
 
+  // Subscribe to central authService state for updates
+  useEffect(() => {
+    const unsubscribe = authService.subscribe((state) => {
+      if (state.error) {
+        setErrorMsg(state.error);
+      }
+      if (state.user && state.status === 'signed-in') {
+        onAuthenticated(state.user);
+      }
+    });
+    return () => unsubscribe();
+  }, [onAuthenticated]);
+
+  const handleTryAgain = () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    authService.clearError();
+  };
+
   // Helper: validate password requirements
   const validatePasswordRequirements = (pwd: string): string | null => {
     if (pwd.length < 8) return 'Password must be at least 8 characters long.';
@@ -49,16 +64,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
     return null;
   };
 
-  // Google Sign In Handler
+  // Google Sign In Handler (triggered ONLY on user click)
   const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
     setIsSubmitting(true);
     try {
-      const user = await firebaseAuthService.signInWithGoogle();
+      const user = await authService.signInWithGoogle();
       onAuthenticated(user);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to sign in with Google. Please try again.');
+      setErrorMsg(err.message || 'Google sign-in could not be completed.');
     } finally {
       setIsSubmitting(false);
     }
@@ -77,19 +92,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
 
     setIsSubmitting(true);
     try {
-      const user = await firebaseAuthService.signInWithEmail(email.trim(), password);
+      const user = await authService.signInWithEmail(email.trim(), password);
       onAuthenticated(user);
     } catch (err: any) {
-      let code = err.code || '';
-      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
-        setErrorMsg('Invalid email or password. Please check your credentials and try again.');
-      } else if (code === 'auth/invalid-email') {
-        setErrorMsg('Please enter a valid email address.');
-      } else if (code === 'auth/too-many-requests') {
-        setErrorMsg('Too many failed attempts. Please try again later or reset your password.');
-      } else {
-        setErrorMsg(err.message || 'Sign in failed. Please check your network and try again.');
-      }
+      setErrorMsg(err.message || 'Sign in failed. Please check your email and password.');
     } finally {
       setIsSubmitting(false);
     }
@@ -128,7 +134,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
 
     setIsSubmitting(true);
     try {
-      const { user, verificationSent } = await firebaseAuthService.signUpWithEmail(fullName.trim(), email.trim(), password);
+      const { user, verificationSent } = await authService.signUpWithEmail(
+        fullName.trim(),
+        email.trim(),
+        password
+      );
       if (verificationSent) {
         setSuccessMsg('Account created! A verification email has been sent to your inbox.');
       } else {
@@ -136,18 +146,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
       }
       setTimeout(() => {
         onAuthenticated(user);
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
-      let code = err.code || '';
-      if (code === 'auth/email-already-in-use') {
-        setErrorMsg('An account with this email address already exists. Please Sign In instead.');
-      } else if (code === 'auth/invalid-email') {
-        setErrorMsg('Please enter a valid email address.');
-      } else if (code === 'auth/weak-password') {
-        setErrorMsg('Password is too weak. Please use a stronger password.');
-      } else {
-        setErrorMsg(err.message || 'Failed to create account. Please try again.');
-      }
+      setErrorMsg(err.message || 'Failed to create account.');
     } finally {
       setIsSubmitting(false);
     }
@@ -166,17 +167,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
 
     setIsSubmitting(true);
     try {
-      await firebaseAuthService.sendPasswordReset(email.trim());
+      await authService.sendPasswordReset(email.trim());
       setSuccessMsg('Password reset link sent! Check your email inbox for instructions.');
     } catch (err: any) {
-      let code = err.code || '';
-      if (code === 'auth/user-not-found') {
-        setErrorMsg('No account found with this email address.');
-      } else if (code === 'auth/invalid-email') {
-        setErrorMsg('Please enter a valid email address.');
-      } else {
-        setErrorMsg(err.message || 'Failed to send password reset email.');
-      }
+      setErrorMsg(err.message || 'Failed to send password reset email.');
     } finally {
       setIsSubmitting(false);
     }
@@ -213,11 +207,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
         </div>
       </div>
 
-      {/* Global Error Banner */}
+      {/* Global Error Banner with Try Again Button */}
       {errorMsg && (
-        <div className="my-2 p-2.5 rounded-xl bg-red-950/80 border border-red-500/40 text-red-300 text-xs flex items-start gap-2 shadow-sm">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <span className="flex-1 leading-snug">{errorMsg}</span>
+        <div className="my-2 p-3 rounded-xl bg-red-950/90 border border-red-500/50 text-red-200 text-xs flex flex-col gap-2 shadow-md">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <span className="flex-1 leading-snug">{errorMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleTryAgain}
+            className="self-end px-3 py-1 rounded-lg bg-red-900/80 hover:bg-red-800 border border-red-500/50 text-red-100 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+          >
+            <RefreshCw className="w-3 h-3 text-red-300" />
+            <span>Try Again</span>
+          </button>
         </div>
       )}
 
@@ -239,7 +243,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
               type="button"
               onClick={handleGoogleSignIn}
               disabled={isSubmitting}
-              className="w-full h-10 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-100 text-xs font-bold flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+              className="w-full h-10 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-100 text-xs font-bold flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-sm disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
             >
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                 <path
@@ -277,7 +281,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
                 setSuccessMsg(null);
                 setMode('signin');
               }}
-              className="w-full h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+              className="w-full h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)] focus:outline-none focus:ring-2 focus:ring-emerald-400"
             >
               <Mail className="w-4 h-4 text-emerald-100" />
               <span>Sign in with Email</span>
@@ -291,7 +295,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
                 setSuccessMsg(null);
                 setMode('signup');
               }}
-              className="w-full h-10 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full h-10 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400"
             >
               <UserIcon className="w-4 h-4 text-amber-400" />
               <span>Create Account</span>
@@ -369,7 +373,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 mt-2"
+              className="w-full h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 mt-2 focus:outline-none focus:ring-2 focus:ring-emerald-400"
             >
               {isSubmitting ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -504,7 +508,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 mt-1"
+              className="w-full h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 mt-1 focus:outline-none focus:ring-2 focus:ring-emerald-400"
             >
               {isSubmitting ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -569,7 +573,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, isLoadi
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full h-9 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              className="w-full h-9 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-amber-400"
             >
               {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Send Reset Email</span>}
             </button>

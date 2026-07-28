@@ -19,6 +19,7 @@ export default defineConfig(() => {
           popup: path.resolve(__dirname, 'popup.html'),
           sidepanel: path.resolve(__dirname, 'sidepanel.html'),
           screenshot_editor: path.resolve(__dirname, 'screenshot-editor.html'),
+          offscreen: path.resolve(__dirname, 'offscreen.html'),
         },
       },
     },

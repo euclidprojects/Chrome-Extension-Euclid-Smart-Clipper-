@@ -23,6 +23,7 @@ import {
   getDownloadURL,
   FirebaseUser,
 } from '../firebase/config';
+import { authService } from './authService';
 import {
   EuclidNote,
   EuclidNotebook,
@@ -55,174 +56,17 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
 }
 
-// Convert Firebase user object or Firestore document to EuclidUser
-export async function buildEuclidUserFromFirebase(fbUser: FirebaseUser): Promise<EuclidUser> {
-  let photo = fbUser.photoURL || null;
-  let name = fbUser.displayName || fbUser.email?.split('@')[0] || 'Euclid User';
-
-  try {
-    const userDocRef = doc(db, 'users', fbUser.uid);
-    const snap = await getDoc(userDocRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data.displayName) name = data.displayName;
-      if (data.photoURL) photo = data.photoURL;
-    }
-  } catch (err) {
-    console.warn('Could not read user profile document:', err);
-  }
-
-  return {
-    uid: fbUser.uid,
-    email: fbUser.email,
-    displayName: name,
-    photoURL: photo,
-    plan: 'pro',
-    storageUsed: 142 * 1024 * 1024,
-    storageLimit: 10 * 1024 * 1024 * 1024,
-    connectedToSmartNotes: true,
-    lastSyncedAt: new Date().toISOString(),
-  };
-}
-
 export const firebaseAuthService = {
-  // Listen to Auth State Changes with shared listener
   onAuthChange(callback: (user: EuclidUser | null) => void): () => void {
-    return onAuthStateChanged(auth, async (fbUser) => {
-      if (fbUser) {
-        const euclidUser = await buildEuclidUserFromFirebase(fbUser);
-        callback(euclidUser);
-      } else {
-        callback(null);
-      }
-    });
+    return authService.subscribe((state) => callback(state.user));
   },
-
-  // Google Sign-In with minimum scopes (openid, email, profile)
-  async signInWithGoogle(): Promise<EuclidUser> {
-    try {
-      const res = await signInWithPopup(auth, googleProvider);
-      const fbUser = res.user;
-
-      const euclidUser: EuclidUser = {
-        uid: fbUser.uid,
-        email: fbUser.email,
-        displayName: fbUser.displayName || 'Euclid User',
-        photoURL: fbUser.photoURL,
-        plan: 'pro',
-        storageUsed: 142 * 1024 * 1024,
-        storageLimit: 10 * 1024 * 1024 * 1024,
-        connectedToSmartNotes: true,
-        lastSyncedAt: new Date().toISOString(),
-      };
-
-      // Save/merge profile in Firestore users/{uid}
-      try {
-        await setDoc(
-          doc(db, 'users', fbUser.uid),
-          {
-            uid: fbUser.uid,
-            displayName: fbUser.displayName || 'Euclid User',
-            email: fbUser.email,
-            photoURL: fbUser.photoURL || null,
-            provider: 'google',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `users/${fbUser.uid}`);
-      }
-
-      return euclidUser;
-    } catch (error: any) {
-      console.error('Google Sign-In error:', error);
-      throw new Error(error.message || 'Google sign-in was cancelled or failed.');
-    }
-  },
-
-  // Create Account with Email and Password
-  async signUpWithEmail(fullName: string, email: string, password: string): Promise<{ user: EuclidUser; verificationSent: boolean }> {
-    // Password validation requirements
-    if (password.length < 8) {
-      throw new Error('Password must be at least 8 characters long.');
-    }
-    if (!/[A-Z]/.test(password)) {
-      throw new Error('Password must contain at least one uppercase letter.');
-    }
-    if (!/[a-z]/.test(password)) {
-      throw new Error('Password must contain at least one lowercase letter.');
-    }
-    if (!/[0-9]/.test(password)) {
-      throw new Error('Password must contain at least one number.');
-    }
-
-    const res = await createUserWithEmailAndPassword(auth, email, password);
-    const fbUser = res.user;
-
-    // Update display name
-    await updateProfile(fbUser, { displayName: fullName });
-
-    // Send verification email
-    let verificationSent = false;
-    try {
-      await sendEmailVerification(fbUser);
-      verificationSent = true;
-    } catch (e) {
-      console.warn('Could not send verification email:', e);
-    }
-
-    const euclidUser: EuclidUser = {
-      uid: fbUser.uid,
-      email: fbUser.email,
-      displayName: fullName,
-      photoURL: null,
-      plan: 'pro',
-      storageUsed: 0,
-      storageLimit: 10 * 1024 * 1024 * 1024,
-      connectedToSmartNotes: true,
-      lastSyncedAt: new Date().toISOString(),
-    };
-
-    // Save profile under users/{uid} in Firestore
-    try {
-      await setDoc(doc(db, 'users', fbUser.uid), {
-        uid: fbUser.uid,
-        displayName: fullName,
-        email: fbUser.email,
-        photoURL: null,
-        provider: 'email',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `users/${fbUser.uid}`);
-    }
-
-    return { user: euclidUser, verificationSent };
-  },
-
-  // Sign In with Email and Password
-  async signInWithEmail(email: string, password: string): Promise<EuclidUser> {
-    const res = await signInWithEmailAndPassword(auth, email, password);
-    const fbUser = res.user;
-    return await buildEuclidUserFromFirebase(fbUser);
-  },
-
-  // Send Password Reset Email
-  async sendPasswordReset(email: string): Promise<void> {
-    await sendPasswordResetEmail(auth, email);
-  },
-
-  // Sign Out
-  async signOut(): Promise<void> {
-    try {
-      await fbSignOut(auth);
-    } catch (e) {
-      console.error('Sign out error:', e);
-    }
-  },
+  signInWithGoogle: () => authService.signInWithGoogle(),
+  signUpWithEmail: (fullName: string, email: string, password: string) =>
+    authService.signUpWithEmail(fullName, email, password),
+  signInWithEmail: (email: string, password: string) =>
+    authService.signInWithEmail(email, password),
+  sendPasswordReset: (email: string) => authService.sendPasswordReset(email),
+  signOut: () => authService.signOut(),
 };
 
 export const firebaseSyncService = {

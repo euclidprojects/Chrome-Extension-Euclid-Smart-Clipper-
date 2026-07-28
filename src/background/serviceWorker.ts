@@ -153,6 +153,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       return true;
     }
 
+    if (request.type === 'GOOGLE_SIGN_IN_REQUEST') {
+      handleGoogleSignInOffscreen()
+        .then((res) => sendResponse(res))
+        .catch((err) => sendResponse({ success: false, error: err?.message || 'Google Auth Error' }));
+      return true;
+    }
+
     if (request.type === 'START_SCREENSHOT_CAPTURE') {
       handleStartScreenshotCapture(request.payload)
         .then((result) => sendResponse(result))
@@ -517,6 +524,35 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
     }
 
     return { success: false, error: 'Unknown screenshot mode.' };
+  }
+
+  async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
+    if (!chrome.offscreen) {
+      return { success: false, error: 'Offscreen API not supported' };
+    }
+
+    try {
+      const hasDoc = await chrome.offscreen.hasDocument();
+      if (!hasDoc) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: [chrome.offscreen.Reason.DOM_SCRAPING || 'DOM_PARSER'],
+          justification: 'Firebase Google Auth in offscreen document',
+        });
+      }
+
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GOOGLE_SIGN_IN_OFFSCREEN' }, (res) => {
+          if (chrome.runtime.lastError) {
+            resolve({ success: false, error: chrome.runtime.lastError.message });
+          } else {
+            resolve(res || { success: false, error: 'No response from offscreen document' });
+          }
+        });
+      });
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Offscreen Auth Failed' };
+    }
   }
 }
 

@@ -10,6 +10,7 @@ console.info("Offscreen API available:", typeof chrome !== "undefined" && Boolea
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 googleProvider.addScope('openid');
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
@@ -43,10 +44,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
           } else if (event.data.type === 'HOSTED_AUTH_ERROR') {
             resolved = true;
             cleanup();
-            console.error("Authentication failure", {
+            console.error("[Auth Debug] Firebase failure", {
               code: event.data.code || 'HOSTED_AUTH_ERROR',
               message: event.data.error || 'Hosted auth error',
-              context: "hosted-auth-page"
+              name: 'HostedAuthError',
+              context: 'hosted-auth'
             });
             sendResponse({
               success: false,
@@ -65,6 +67,14 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         cleanup();
         console.info("Hosted auth iframe pending, completing via offscreen auth window...");
 
+        console.info("[Auth Debug] Calling function", {
+          functionName: "signInWithPopup",
+          authExists: Boolean(auth),
+          appExists: Boolean(app),
+          projectId: firebaseConfig?.projectId,
+          hasRequiredArguments: Boolean(auth && googleProvider)
+        });
+
         signInWithPopup(auth, googleProvider)
           .then((result) => {
             sendResponse({
@@ -78,9 +88,10 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
             });
           })
           .catch((err) => {
-            console.error("Authentication failure", {
+            console.error("[Auth Debug] Firebase failure", {
               code: err?.code,
               message: err?.message,
+              name: err?.name,
               context: "offscreen"
             });
             sendResponse({

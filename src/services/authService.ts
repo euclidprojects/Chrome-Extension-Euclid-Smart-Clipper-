@@ -34,6 +34,7 @@ export interface AuthState {
 }
 
 export const authErrorMessages: Record<string, string> = {
+  "auth/argument-error": "Authentication received invalid configuration data. Please reload the extension and try again.",
   "auth/internal-error": "Authentication could not be started. Please try again.",
   "auth/operation-not-allowed": "This sign-in method is not currently enabled.",
   "auth/invalid-credential": "The email or password is incorrect.",
@@ -130,6 +131,14 @@ class AuthService {
     this.state.error = null;
     this.state.errorCode = null;
 
+    console.info("[Auth Debug] Calling function", {
+      functionName: "onAuthStateChanged",
+      authExists: Boolean(auth),
+      appExists: true,
+      projectId: firebaseConfig?.projectId,
+      hasRequiredArguments: Boolean(auth)
+    });
+
     this.unsubscribeFirebase = onAuthStateChanged(
       auth,
       async (fbUser) => {
@@ -143,9 +152,10 @@ class AuthService {
               errorCode: null,
             });
           } catch (e: any) {
-            console.error("Authentication failure", {
+            console.error("[Auth Debug] Firebase failure", {
               code: e?.code,
               message: e?.message,
+              name: e?.name,
               context: "popup"
             });
             this.updateState({
@@ -175,9 +185,10 @@ class AuthService {
         }
       },
       (error: any) => {
-        console.error("Authentication failure", {
+        console.error("[Auth Debug] Firebase failure", {
           code: error?.code,
           message: error?.message,
+          name: error?.name,
           context: "popup"
         });
         // A signed-out user is normal; do not show error on initial load
@@ -249,7 +260,12 @@ class AuthService {
       });
       return euclidUser;
     } catch (error: any) {
-      console.error('Google Auth failure:', { code: error?.code, message: error?.message });
+      console.error('[Auth Debug] Firebase failure', {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        context: 'popup'
+      });
       const friendly = getFriendlyAuthErrorMessage(error);
       this.updateState({
         status: 'signed-out',
@@ -262,9 +278,23 @@ class AuthService {
   }
 
   public async signInWithEmail(email: string, password: string): Promise<EuclidUser> {
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      const err = new Error("Email and password are required.");
+      this.updateState({ status: 'signed-out', error: err.message, errorCode: 'auth/missing-fields' });
+      throw err;
+    }
+
+    console.info("[Auth Debug] Calling function", {
+      functionName: "signInWithEmailAndPassword",
+      authExists: Boolean(auth),
+      appExists: true,
+      projectId: firebaseConfig?.projectId,
+      hasRequiredArguments: Boolean(email.trim() && password)
+    });
+
     this.updateState({ status: 'authenticating', error: null, errorCode: null });
     try {
-      const res = await signInWithEmailAndPassword(auth, email, password);
+      const res = await signInWithEmailAndPassword(auth, email.trim(), password);
       const euclidUser = await buildEuclidUserFromFirebase(res.user);
       this.updateState({
         status: 'signed-in',
@@ -273,7 +303,12 @@ class AuthService {
       });
       return euclidUser;
     } catch (error: any) {
-      console.error('Email sign-in failure:', { code: error?.code, message: error?.message });
+      console.error('[Auth Debug] Firebase failure', {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        context: 'popup'
+      });
       const friendly = getFriendlyAuthErrorMessage(error);
       this.updateState({
         status: 'signed-out',
@@ -290,37 +325,75 @@ class AuthService {
     email: string,
     password: string
   ): Promise<{ user: EuclidUser; verificationSent: boolean }> {
-    this.updateState({ status: 'authenticating', error: null, errorCode: null });
+    if (typeof fullName !== "string" || !fullName.trim()) {
+      const err = new Error("Full name is required.");
+      this.updateState({ status: 'signed-out', error: err.message, errorCode: 'auth/missing-fields' });
+      throw err;
+    }
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      const err = new Error("Email and password are required.");
+      this.updateState({ status: 'signed-out', error: err.message, errorCode: 'auth/missing-fields' });
+      throw err;
+    }
 
     if (password.length < 8) {
       const msg = 'Password must be at least 8 characters long.';
-      this.updateState({ status: 'signed-out', error: msg });
+      this.updateState({ status: 'signed-out', error: msg, errorCode: 'auth/weak-password' });
       throw new Error(msg);
     }
     if (!/[A-Z]/.test(password)) {
       const msg = 'Password must contain at least one uppercase letter.';
-      this.updateState({ status: 'signed-out', error: msg });
+      this.updateState({ status: 'signed-out', error: msg, errorCode: 'auth/weak-password' });
       throw new Error(msg);
     }
     if (!/[a-z]/.test(password)) {
       const msg = 'Password must contain at least one lowercase letter.';
-      this.updateState({ status: 'signed-out', error: msg });
+      this.updateState({ status: 'signed-out', error: msg, errorCode: 'auth/weak-password' });
       throw new Error(msg);
     }
     if (!/[0-9]/.test(password)) {
       const msg = 'Password must contain at least one number.';
-      this.updateState({ status: 'signed-out', error: msg });
+      this.updateState({ status: 'signed-out', error: msg, errorCode: 'auth/weak-password' });
       throw new Error(msg);
     }
 
+    this.updateState({ status: 'authenticating', error: null, errorCode: null });
+
     try {
-      const res = await createUserWithEmailAndPassword(auth, email, password);
+      console.info("[Auth Debug] Calling function", {
+        functionName: "createUserWithEmailAndPassword",
+        authExists: Boolean(auth),
+        appExists: true,
+        projectId: firebaseConfig?.projectId,
+        hasRequiredArguments: Boolean(email.trim() && password)
+      });
+
+      const res = await createUserWithEmailAndPassword(auth, email.trim(), password);
       const fbUser = res.user;
 
-      await updateProfile(fbUser, { displayName: fullName });
+      if (!fbUser) {
+        throw new Error("Firebase user was not returned.");
+      }
+
+      console.info("[Auth Debug] Calling function", {
+        functionName: "updateProfile",
+        authExists: Boolean(auth),
+        appExists: true,
+        projectId: firebaseConfig?.projectId,
+        hasRequiredArguments: Boolean(fbUser && fullName.trim())
+      });
+
+      await updateProfile(fbUser, { displayName: fullName.trim() });
 
       let verificationSent = false;
       try {
+        console.info("[Auth Debug] Calling function", {
+          functionName: "sendEmailVerification",
+          authExists: Boolean(auth),
+          appExists: true,
+          projectId: firebaseConfig?.projectId,
+          hasRequiredArguments: Boolean(fbUser)
+        });
         await sendEmailVerification(fbUser);
         verificationSent = true;
       } catch (e) {
@@ -330,7 +403,7 @@ class AuthService {
       const euclidUser: EuclidUser = {
         uid: fbUser.uid,
         email: fbUser.email,
-        displayName: fullName,
+        displayName: fullName.trim(),
         photoURL: null,
         plan: 'pro',
         storageUsed: 0,
@@ -342,7 +415,7 @@ class AuthService {
       try {
         await setDoc(doc(db, 'users', fbUser.uid), {
           uid: fbUser.uid,
-          displayName: fullName,
+          displayName: fullName.trim(),
           email: fbUser.email,
           photoURL: null,
           provider: 'email',
@@ -361,7 +434,12 @@ class AuthService {
 
       return { user: euclidUser, verificationSent };
     } catch (error: any) {
-      console.error('Email sign-up failure:', { code: error?.code, message: error?.message });
+      console.error('[Auth Debug] Firebase failure', {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        context: 'popup'
+      });
       const friendly = getFriendlyAuthErrorMessage(error);
       this.updateState({
         status: 'signed-out',
@@ -374,16 +452,42 @@ class AuthService {
   }
 
   public async sendPasswordReset(email: string): Promise<void> {
+    if (typeof email !== "string" || !email.trim()) {
+      const err = new Error("Email is required.");
+      throw err;
+    }
+
+    console.info("[Auth Debug] Calling function", {
+      functionName: "sendPasswordResetEmail",
+      authExists: Boolean(auth),
+      appExists: true,
+      projectId: firebaseConfig?.projectId,
+      hasRequiredArguments: Boolean(email.trim())
+    });
+
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, email.trim());
     } catch (error: any) {
-      console.error('Password reset failure:', { code: error?.code, message: error?.message });
+      console.error('[Auth Debug] Firebase failure', {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        context: 'popup'
+      });
       const friendly = getFriendlyAuthErrorMessage(error);
       throw new Error(friendly);
     }
   }
 
   public async signOut(): Promise<void> {
+    console.info("[Auth Debug] Calling function", {
+      functionName: "signOut",
+      authExists: Boolean(auth),
+      appExists: true,
+      projectId: firebaseConfig?.projectId,
+      hasRequiredArguments: Boolean(auth)
+    });
+
     try {
       await fbSignOut(auth);
       this.updateState({
@@ -393,7 +497,12 @@ class AuthService {
         errorCode: null,
       });
     } catch (error: any) {
-      console.error('Sign-out error:', error);
+      console.error('[Auth Debug] Firebase failure', {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        context: 'popup'
+      });
       this.updateState({
         status: 'signed-out',
         user: null,

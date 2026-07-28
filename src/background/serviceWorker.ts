@@ -544,6 +544,14 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   }
 
   async function handleGoogleSignInOffscreen(): Promise<{ success: boolean; user?: any; error?: string }> {
+    console.info("[Auth Debug] Calling function", {
+      functionName: "handleGoogleSignInOffscreen",
+      authExists: true,
+      appExists: true,
+      projectId: "euclid-projects",
+      hasRequiredArguments: true
+    });
+
     if (!chrome.offscreen) {
       return { success: false, error: 'Offscreen API not supported' };
     }
@@ -553,18 +561,19 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
       if (!hasDoc) {
         await chrome.offscreen.createDocument({
           url: 'offscreen.html',
-          reasons: [(chrome.offscreen.Reason as any)?.DOM_SCRAPING || 'DOM_PARSER'],
-          justification: 'Firebase Google Auth in offscreen document',
+          reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
+          justification: 'Complete Firebase Google authentication through a hosted iframe.',
         });
       }
 
       return new Promise((resolve) => {
         chrome.runtime.sendMessage({ type: 'GOOGLE_SIGN_IN_OFFSCREEN' }, (res) => {
           if (chrome.runtime.lastError) {
-            console.error("Authentication failure", {
+            console.error("[Auth Debug] Firebase failure", {
               code: chrome.runtime.lastError.message,
               message: chrome.runtime.lastError.message,
-              context: "service-worker"
+              name: 'ChromeRuntimeError',
+              context: 'background'
             });
             resolve({ success: false, error: chrome.runtime.lastError.message });
           } else {
@@ -573,10 +582,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         });
       });
     } catch (err: any) {
-      console.error("Authentication failure", {
-        code: err?.code || err?.message,
+      console.error("[Auth Debug] Firebase failure", {
+        code: err?.code || 'OFFSCREEN_AUTH_FAILED',
         message: err?.message,
-        context: "service-worker"
+        name: err?.name,
+        context: 'background'
       });
       return { success: false, error: err?.message || 'Offscreen Auth Failed' };
     }

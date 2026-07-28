@@ -20,6 +20,17 @@ export default defineConfig(() => {
           sidepanel: path.resolve(__dirname, 'sidepanel.html'),
           screenshot_editor: path.resolve(__dirname, 'screenshot-editor.html'),
           offscreen: path.resolve(__dirname, 'offscreen.html'),
+          serviceWorker: path.resolve(__dirname, 'src/service-worker.ts'),
+        },
+        output: {
+          entryFileNames: (chunkInfo) => {
+            if (chunkInfo.name === 'serviceWorker') {
+              return 'service-worker.js';
+            }
+            return 'assets/[name]-[hash].js';
+          },
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash][extname]',
         },
       },
     },

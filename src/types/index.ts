@@ -1,3 +1,10 @@
+export type ClipType =
+  | 'webpage_annotation'
+  | 'screenshot'
+  | 'youtube_note'
+  | 'bookmark'
+  | 'full_page';
+
 export type EuclidNoteType =
   | 'standard'
   | 'web_clip'
@@ -207,7 +214,7 @@ export interface EuclidNote {
   sourcePublishedAt?: string;
   sourceFavicon?: string;
   sourceThumbnail?: string;
-  clipFormat?: 'simplified' | 'full' | 'selection' | 'bookmark' | 'screenshot' | 'pdf' | 'markdown' | 'code';
+  clipFormat?: ClipType;
   wordCount?: number;
   readingTime?: number;
   tags?: string[];

@@ -9,11 +9,10 @@
 html,
 body,
 #root {
-  width: 460px;
-  min-width: 420px;
-  max-width: 520px;
+  width: 360px;
+  min-width: 340px;
+  max-width: 380px;
   height: 600px;
-  min-height: 560px;
   margin: 0 auto;
   padding: 0;
   overflow: hidden;
@@ -41,17 +40,16 @@ body,
   background-color: #0F1115;
 }
 
-.clipper-content {
+.clipper-scroll-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
 }
 
 /* Custom subtle dark scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: #0F1115;

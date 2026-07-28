@@ -13,43 +13,43 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
-          id: 'euclid-clip-article',
-          title: 'Clip Simplified Article',
-          contexts: ['page'],
-        });
-
-        chrome.contextMenus.create({
-          parentId: 'euclid-parent',
-          id: 'euclid-clip-selection',
-          title: 'Clip Selected Text',
-          contexts: ['selection'],
-        });
-
-        chrome.contextMenus.create({
-          parentId: 'euclid-parent',
-          id: 'euclid-clip-image',
-          title: 'Clip Image to Smart Notes',
-          contexts: ['image'],
-        });
-
-        chrome.contextMenus.create({
-          parentId: 'euclid-parent',
-          id: 'euclid-save-bookmark',
-          title: 'Save Bookmark',
-          contexts: ['page', 'link'],
-        });
-
-        chrome.contextMenus.create({
-          parentId: 'euclid-parent',
-          id: 'euclid-capture-screenshot',
-          title: 'Capture Visible Screenshot',
+          id: 'euclid-webpage-annotation',
+          title: 'Webpage Annotation',
           contexts: ['all'],
         });
 
         chrome.contextMenus.create({
           parentId: 'euclid-parent',
-          id: 'euclid-open-sidepanel',
-          title: 'Open Side Panel',
+          id: 'euclid-screenshot',
+          title: 'Screenshot',
+          contexts: ['all'],
+        });
+
+        chrome.contextMenus.create({
+          parentId: 'euclid-parent',
+          id: 'euclid-youtube-note',
+          title: 'YouTube Note',
+          contexts: ['all'],
+        });
+
+        chrome.contextMenus.create({
+          parentId: 'euclid-parent',
+          id: 'euclid-bookmark',
+          title: 'Bookmark',
+          contexts: ['all'],
+        });
+
+        chrome.contextMenus.create({
+          parentId: 'euclid-parent',
+          id: 'euclid-full-page',
+          title: 'Full Page',
+          contexts: ['all'],
+        });
+
+        chrome.contextMenus.create({
+          parentId: 'euclid-parent',
+          id: 'euclid-save-clip',
+          title: 'Save Clip',
           contexts: ['all'],
         });
       });

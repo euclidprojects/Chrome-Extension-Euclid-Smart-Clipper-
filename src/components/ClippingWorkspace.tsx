@@ -1,21 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import {
-  FileText,
-  Globe,
-  Scissors,
-  Bookmark,
+  PenTool,
   Camera,
-  ImageIcon,
-  FileCode,
   Youtube,
-  Video,
+  Bookmark,
+  Layers,
   Check,
   ChevronDown,
   ChevronUp,
   Plus,
   BookOpen,
-  Folder as FolderIcon,
-  Tag as TagIcon,
   Settings,
   X,
   ExternalLink,
@@ -23,13 +17,14 @@ import {
   Copy,
   RotateCcw,
   CheckCircle2,
-  HelpCircle,
   RefreshCw,
   Search,
-  Sidebar,
-  Layers,
-  FilePlus,
-  PenTool,
+  AlertCircle,
+  Video,
+  Crop,
+  Image as ImageIcon,
+  FileText,
+  CheckSquare,
 } from 'lucide-react';
 import {
   EuclidNotebook,
@@ -37,6 +32,7 @@ import {
   EuclidTag,
   EuclidNote,
   EuclidNoteType,
+  ClipType,
 } from '../types';
 import { clippingService } from '../services/clippingService';
 import { AnnotationPanel } from './AnnotationPanel';
@@ -56,17 +52,7 @@ interface ClippingWorkspaceProps {
   onOpenSettings?: () => void;
 }
 
-export type ClipFormatType =
-  | 'simplified'
-  | 'full_article'
-  | 'full_page'
-  | 'selection'
-  | 'bookmark'
-  | 'screenshot'
-  | 'image'
-  | 'pdf'
-  | 'youtube'
-  | 'video';
+export type ClipFormatType = ClipType;
 
 export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   notebooks,
@@ -78,30 +64,34 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   onCreateFolder,
   onCreateTag,
   onOpenSmartNotesNote,
-  isSidePanel = false,
+  isSidePanel,
   onOpenSidePanel,
   onOpenSettings,
 }) => {
-  // Mode switcher: 'clip' vs 'annotation'
-  const [workspaceMode, setWorkspaceMode] = useState<'clip' | 'annotation'>('clip');
+  // Primary selected clip option - DEFAULT: webpage_annotation
+  const [clipFormat, setClipFormat] = useState<ClipFormatType>('webpage_annotation');
 
-  // Page context state
-  const [pageContext, setPageContext] = useState<'article' | 'youtube' | 'pdf' | 'selection'>('article');
-  
-  // Format choice
-  const [clipFormat, setClipFormat] = useState<ClipFormatType>('simplified');
-
-  // Page Metadata
+  // Page Context & Metadata
   const [url, setUrl] = useState('https://en.wikipedia.org/wiki/Euclid');
   const [pageTitle, setPageTitle] = useState('Euclid — Father of Geometry & Axiomatic Systems');
   const [faviconUrl, setFaviconUrl] = useState('https://en.wikipedia.org/static/favicon/wikipedia.ico');
   const [author, setAuthor] = useState('Euclid Projects Research');
   const [noteTitle, setNoteTitle] = useState('Euclid — Father of Geometry & Axiomatic Systems');
-  const [noteComment, setNoteComment] = useState('');
+  const [noteRemark, setNoteRemark] = useState('');
+  const [isYouTubePage, setIsYouTubePage] = useState(false);
 
-  const [selectedText, setSelectedText] = useState(
-    'Euclid of Alexandria was a Greek mathematician, often referred to as the father of geometry. His Elements is one of the most influential works in the history of mathematics.'
-  );
+  // Sub-choice for Screenshot mode
+  const [screenshotMode, setScreenshotMode] = useState<'visible' | 'selection' | 'full' | 'video_frame'>('visible');
+
+  // Full Page Options
+  const [includeImages, setIncludeImages] = useState(true);
+  const [includeLinks, setIncludeLinks] = useState(true);
+  const [includeTables, setIncludeTables] = useState(true);
+  const [includeAnnotations, setIncludeAnnotations] = useState(true);
+
+  // YouTube Note State
+  const [ytTimestamp, setYtTimestamp] = useState('02:45');
+  const [ytNoteInput, setYtNoteInput] = useState('');
 
   // Destination Pickers
   const [selectedNotebookId, setSelectedNotebookId] = useState<string>(
@@ -119,63 +109,77 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   // Inline Creation State
   const [showAddNotebookInput, setShowAddNotebookInput] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
-  
   const [showAddFolderInput, setShowAddFolderInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-
   const [showAddTagInput, setShowAddTagInput] = useState(false);
   const [newTagName, setNewTagName] = useState('');
-
-  // Advanced Options Accordion
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-  const [advOptions, setAdvOptions] = useState({
-    includeSourceLink: true,
-    includeMetadata: true,
-    includeImages: true,
-    includeAnnotations: true,
-    includeTranscript: true,
-    includeScreenshots: true,
-    keepOfflineCopy: true,
-    saveAsMarkdown: false,
-    saveAsEditableWebClip: true,
-  });
 
   // Save Progress State
   const [isSaving, setIsSaving] = useState(false);
   const [saveStepMessage, setSaveStepMessage] = useState<string>('');
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Side Panel Tab state (if rendered in side panel)
-  const [sidePanelTab, setSidePanelTab] = useState<'clip' | 'notes' | 'annotations' | 'video' | 'transcript'>('clip');
-
-  // Update note title automatically if page title changes unless user edited it
+  // Sync title when page title changes unless edited
   useEffect(() => {
     if (!noteTitle || noteTitle === pageTitle) {
       setNoteTitle(pageTitle);
     }
   }, [pageTitle]);
 
-  // Adjust default clip format when page context shifts
+  // Check current page domain / type
   useEffect(() => {
-    if (pageContext === 'youtube') {
-      setClipFormat('youtube');
-      setUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
-      setPageTitle('Euclid Elements: The Foundations of Mathematics Revealed');
-    } else if (pageContext === 'pdf') {
-      setClipFormat('pdf');
-      setUrl('https://euclidprojects.org/papers/elements_treatise.pdf');
-      setPageTitle('Treatise on Euclidean Axioms and Geometric Proofs.pdf');
-    } else if (pageContext === 'selection') {
-      setClipFormat('selection');
-    } else {
-      setClipFormat('simplified');
-      setUrl('https://en.wikipedia.org/wiki/Euclid');
-      setPageTitle('Euclid — Father of Geometry & Axiomatic Systems');
-    }
-  }, [pageContext]);
+    const checkYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+    setIsYouTubePage(checkYouTube);
+  }, [url]);
 
-  // Handle notebook selection & remember
+  // Approved 5 Clipping Options in EXACT specified order
+  const approvedFormats: Array<{
+    id: ClipFormatType;
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+    testId: string;
+  }> = [
+    {
+      id: 'webpage_annotation',
+      label: 'Webpage Annotation',
+      description: 'Annotate and highlight webpage directly',
+      icon: <PenTool className="w-5 h-5 text-emerald-400" />,
+      testId: 'clip-option-webpage-annotation',
+    },
+    {
+      id: 'screenshot',
+      label: 'Screenshot',
+      description: 'Capture visible area, selection, or video frame',
+      icon: <Camera className="w-5 h-5 text-emerald-400" />,
+      testId: 'clip-option-screenshot',
+    },
+    {
+      id: 'youtube_note',
+      label: 'YouTube Note',
+      description: 'Timestamped notes, transcript & video frame',
+      icon: <Youtube className="w-5 h-5 text-red-400" />,
+      testId: 'clip-option-youtube-note',
+    },
+    {
+      id: 'bookmark',
+      label: 'Bookmark',
+      description: 'Save link, summary, favicon & page metadata',
+      icon: <Bookmark className="w-5 h-5 text-emerald-400" />,
+      testId: 'clip-option-bookmark',
+    },
+    {
+      id: 'full_page',
+      label: 'Full Page',
+      description: 'Complete webpage layout, HTML, images & links',
+      icon: <Layers className="w-5 h-5 text-emerald-400" />,
+      testId: 'clip-option-full-page',
+    },
+  ];
+
+  // Destination handlers
   const handleSelectNotebook = (id: string) => {
     setSelectedNotebookId(id);
     localStorage.setItem('euclid_last_notebook', id);
@@ -194,7 +198,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     }
   };
 
-  // Inline Handlers
   const handleCreateNewNotebook = () => {
     if (newNotebookName.trim()) {
       onCreateNotebook(newNotebookName.trim(), '#10b981');
@@ -219,15 +222,21 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     }
   };
 
-  // Primary Save Action with Animated Multi-step Progress
+  // Centralized Primary Save Action
   const handlePrimarySave = async (localOnly = false) => {
+    if (clipFormat === 'youtube_note' && !isYouTubePage) {
+      setSaveError('Open a YouTube video to use YouTube Note.');
+      return;
+    }
+
     setIsSaving(true);
+    setSaveError(null);
     setSavedNoteId(null);
 
     const steps = [
       'Preparing clip...',
-      'Collecting annotations...',
-      'Extracting page content...',
+      'Collecting page data...',
+      'Sanitizing content...',
       localOnly ? 'Saving locally...' : 'Uploading assets...',
       'Creating Smart Notes note...',
       'Saved successfully!',
@@ -235,55 +244,68 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
 
     for (let i = 0; i < steps.length; i++) {
       setSaveStepMessage(steps[i]);
-      await new Promise((resolve) => setTimeout(resolve, 280));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
-    let noteType: EuclidNoteType = 'web_clip';
-    if (clipFormat === 'simplified' || clipFormat === 'full_article' || clipFormat === 'full_page') noteType = 'article';
-    if (clipFormat === 'bookmark') noteType = 'bookmark';
-    if (clipFormat === 'screenshot' || clipFormat === 'image') noteType = 'screenshot';
-    if (clipFormat === 'youtube' || clipFormat === 'video') noteType = 'youtube';
+    try {
+      let noteType: EuclidNoteType = 'web_clip';
+      if (clipFormat === 'webpage_annotation') noteType = 'annotated_screenshot';
+      if (clipFormat === 'screenshot') noteType = 'screenshot';
+      if (clipFormat === 'youtube_note') noteType = 'youtube';
+      if (clipFormat === 'bookmark') noteType = 'bookmark';
+      if (clipFormat === 'full_page') noteType = 'article';
 
-    const currentContent = clippingService.extractSimplifiedArticle(
-      `<div><h1>${noteTitle}</h1><p>${noteComment || 'Clipped with Euclid Smart Clipper'}</p><p>${selectedText}</p></div>`,
-      url,
-      noteTitle
-    );
+      const selectedTagNames = tags
+        .filter((t) => selectedTagIds.includes(t.id))
+        .map((t) => t.name);
 
-    const selectedTagNames = tags
-      .filter((t) => selectedTagIds.includes(t.id))
-      .map((t) => t.name);
+      let content = `<p>${noteRemark}</p>`;
+      if (clipFormat === 'youtube_note' && ytNoteInput) {
+        content = `<div><p><strong>Timestamp [${ytTimestamp}]:</strong> ${ytNoteInput}</p><p>${noteRemark}</p></div>`;
+      } else {
+        const extractedArticle = clippingService.extractSimplifiedArticle(
+          `<div><h1>${noteTitle}</h1><p>${noteRemark}</p></div>`,
+          url,
+          noteTitle
+        );
+        content = extractedArticle.cleanHtml || `<p>${noteRemark}</p>`;
+      }
 
-    const newNoteId = 'note_' + Date.now();
-    const noteToSave: EuclidNote = {
-      id: newNoteId,
-      user_id: 'local-user',
-      title: noteTitle,
-      content: currentContent.cleanHtml || currentContent.markdown || '',
-      plainTextContent: noteComment + '\n' + selectedText,
-      markdownContent: currentContent.markdown,
-      notebook_id: selectedNotebookId,
-      folder_id: selectedFolderId || null,
-      tags: selectedTagNames,
-      noteType,
-      sourceUrl: url,
-      canonicalUrl: url,
-      sourceTitle: pageTitle,
-      sourceDomain: new URL(url).hostname,
-      sourceAuthor: author,
-      clipFormat,
-      wordCount: selectedText.split(/\s+/).length,
-      readingTime: 1,
-      extensionCreated: true,
-      extensionVersion: '1.0.0',
-      syncStatus: localOnly ? 'queued' : 'synced',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+      const newNoteId = 'note_' + Date.now();
+      const noteToSave: EuclidNote = {
+        id: newNoteId,
+        user_id: 'local-user',
+        title: noteTitle || pageTitle,
+        content,
+        plainTextContent: noteRemark,
+        markdownContent: `# ${noteTitle}\n\n${noteRemark}`,
+        notebook_id: selectedNotebookId,
+        folder_id: selectedFolderId || null,
+        tags: selectedTagNames,
+        noteType,
+        sourceUrl: url,
+        canonicalUrl: url,
+        sourceTitle: pageTitle,
+        sourceDomain: domainName(),
+        sourceAuthor: author,
+        sourceFavicon: faviconUrl,
+        clipFormat,
+        wordCount: noteRemark.split(/\s+/).filter(Boolean).length || 10,
+        readingTime: 1,
+        extensionCreated: true,
+        extensionVersion: '1.0.0',
+        syncStatus: localOnly ? 'queued' : 'synced',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    await onSaveNote(noteToSave);
-    setIsSaving(false);
-    setSavedNoteId(newNoteId);
+      await onSaveNote(noteToSave);
+      setIsSaving(false);
+      setSavedNoteId(newNoteId);
+    } catch (err: any) {
+      setIsSaving(false);
+      setSaveError(err?.message || 'Failed to save clip');
+    }
   };
 
   const handleCopyLink = () => {
@@ -299,69 +321,6 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
     setSaveStepMessage('');
   };
 
-  // Complete List of All 9 Clipping Formats
-  const allFormats: Array<{
-    id: ClipFormatType;
-    label: string;
-    description: string;
-    icon: React.ReactNode;
-  }> = [
-    {
-      id: 'simplified',
-      label: 'Simplified Article',
-      description: 'Clean body text without ads or clutter',
-      icon: <FileText className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'full_article',
-      label: 'Full Article',
-      description: 'Complete article with inline graphics',
-      icon: <Globe className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'full_page',
-      label: 'Full Page',
-      description: 'Entire web page layout snapshot',
-      icon: <Layers className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'selection',
-      label: 'Selected Text',
-      description: 'Save highlighted text excerpt',
-      icon: <Scissors className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'bookmark',
-      label: 'Bookmark',
-      description: 'Quick link reference & metadata',
-      icon: <Bookmark className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'screenshot',
-      label: 'Screenshot',
-      description: 'Capture visible area or element',
-      icon: <Camera className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'youtube',
-      label: 'YouTube Note',
-      description: 'Timestamped video note & transcript',
-      icon: <Youtube className="w-5 h-5 text-red-400" />,
-    },
-    {
-      id: 'video',
-      label: 'Video Note',
-      description: 'HTML5 video snapshot & timeline',
-      icon: <Video className="w-5 h-5 text-emerald-400" />,
-    },
-    {
-      id: 'pdf',
-      label: 'PDF Note',
-      description: 'PDF document & page highlights',
-      icon: <FileCode className="w-5 h-5 text-emerald-400" />,
-    },
-  ];
-
   const domainName = () => {
     try {
       return new URL(url).hostname;
@@ -373,35 +332,50 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const filteredFolders = folders.filter((f) => !f.notebookId || f.notebookId === selectedNotebookId);
 
   return (
-    <div className="clipper-popup">
-      {/* 1. STICKY HEADER (Emerald background with white text & yellow accent) */}
-      <header className="h-[56px] px-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-lg">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-amber-300/60 flex items-center justify-center shrink-0">
-            <img src="/icons/icon32.png" alt="Euclid Logo" className="w-5 h-5 object-contain" />
+    <div className="clipper-popup flex flex-col w-full h-full bg-[#0c1319] text-slate-100 overflow-hidden select-none">
+      
+      {/* 1. STICKY HEADER & 2. CONNECTION STATUS */}
+      <header className="h-[46px] px-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-lg sticky top-0 z-30">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-6.5 h-6.5 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-amber-300/60 flex items-center justify-center shrink-0">
+            <img src="/icons/icon32.png" alt="Euclid Logo" className="w-3.5 h-3.5 object-contain" />
           </div>
-          <div>
-            <h1 className="font-extrabold text-[16px] text-white tracking-tight leading-tight flex items-center gap-1.5">
-              <span>Euclid Smart Clipper</span>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#facc15]" />
+          <div className="min-w-0">
+            <h1 className="font-extrabold text-[14px] text-white tracking-tight leading-tight flex items-center gap-1.5 truncate">
+              <span className="truncate">Euclid Smart Clipper</span>
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#facc15] shrink-0" title="Connected" />
             </h1>
-            <p className="text-[11px] text-emerald-300 font-medium flex items-center gap-1">
-              <span>Connected to Euclid Smart Notes</span>
+            <p className="text-[10px] text-emerald-300 font-medium truncate">
+              Connected to Euclid Smart Notes
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
+          {!isSidePanel && onOpenSidePanel && (
+            <button
+              type="button"
+              onClick={onOpenSidePanel}
+              className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+              title="Open in Side Panel"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </button>
+          )}
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
           <button
-            onClick={() => onOpenSettings ? onOpenSettings() : alert('Euclid Clipper Settings')}
-            className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/50 transition-colors"
-            title="Clipper Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-          <button
+            type="button"
             onClick={() => window.close()}
-            className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/50 transition-colors"
+            className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
             title="Close Clipper"
           >
             <X className="w-4 h-4" />
@@ -409,493 +383,599 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         </div>
       </header>
 
-      {/* Mode Switcher Bar: Clipping Mode vs Annotation Mode */}
-      <div className="bg-[#080d12] px-3 py-1.5 border-b border-slate-800/80 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1 bg-[#0f1720] p-1 rounded-xl border border-slate-800 w-full">
-          <button
-            onClick={() => setWorkspaceMode('clip')}
-            className={`flex-1 py-1.5 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              workspaceMode === 'clip'
-                ? 'bg-emerald-600 text-white shadow-sm border border-amber-300/40'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Scissors className="w-3.5 h-3.5 text-amber-300" />
-            <span>Clip Page</span>
-          </button>
+      {/* SINGLE VERTICAL SCROLL CONTENT AREA */}
+      <div className="clipper-scroll-content flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 divide-y divide-slate-800/80">
+        
+        {/* 3. CLIPPING OPTIONS */}
+        <div className="space-y-1.5">
+          <h2 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <span>Clipping Options</span>
+          </h2>
 
-          <button
-            onClick={() => setWorkspaceMode('annotation')}
-            className={`flex-1 py-1.5 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-              workspaceMode === 'annotation'
-                ? 'bg-emerald-600 text-white shadow-sm border border-amber-300/40'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <PenTool className="w-3.5 h-3.5 text-amber-300" />
-            <span>Webpage Annotation</span>
-          </button>
+          {/* Exactly 5 options in single-column vertical list */}
+          <div className="space-y-1">
+            {approvedFormats.map((fmt) => {
+              const isSelected = clipFormat === fmt.id;
+              return (
+                <button
+                  key={fmt.id}
+                  data-testid={fmt.testId}
+                  type="button"
+                  title={fmt.description}
+                  onClick={() => {
+                    setClipFormat(fmt.id);
+                    setSavedNoteId(null);
+                    setSaveError(null);
+                  }}
+                  className={`w-full h-[40px] px-2.5 rounded-lg border text-left flex items-center justify-between transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-emerald-950/90 border-emerald-500/90 text-white shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                      : 'bg-[#161920] border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-[#1C202B]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`p-1 rounded-md shrink-0 ${isSelected ? 'bg-emerald-500/20 text-amber-300' : 'bg-slate-900 text-slate-400'}`}>
+                      {fmt.icon}
+                    </div>
+                    <span className={`font-bold text-[13px] truncate ${isSelected ? 'text-amber-300' : 'text-slate-100'}`}>
+                      {fmt.label}
+                    </span>
+                  </div>
+
+                  <div className="shrink-0 ml-1.5">
+                    {isSelected ? (
+                      <div className="w-4 h-4 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-sm">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </div>
+                    ) : (
+                      <div className="w-3.5 h-3.5 rounded-full border border-slate-700" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* C. SELECTED CLIP-TYPE TOOLS & SETTINGS */}
+        <div className="pt-3 space-y-3">
+          {clipFormat === 'webpage_annotation' && (
+            <div className="space-y-2">
+              <AnnotationPanel
+                notebooks={notebooks}
+                folders={folders}
+                tags={tags}
+                existingNotes={existingNotes}
+                onSaveNote={onSaveNote}
+                onCreateNotebook={onCreateNotebook}
+                onCreateFolder={onCreateFolder}
+                onCreateTag={onCreateTag}
+                onOpenSmartNotesNote={onOpenSmartNotesNote}
+                isFloatingOverlay={false}
+                pageTitle={pageTitle}
+                pageUrl={url}
+                hideHeaderAndSave={true}
+                hideDestinationControls={true}
+              />
+            </div>
+          )}
+
+          {clipFormat === 'screenshot' && (
+            <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-3">
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
+                Screenshot Options
+              </span>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setScreenshotMode('visible')}
+                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    screenshotMode === 'visible' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Visible Page</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScreenshotMode('selection')}
+                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    screenshotMode === 'selection' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <Crop className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Selected Region</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScreenshotMode('full')}
+                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    screenshotMode === 'full' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Full Page</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setScreenshotMode('video_frame')}
+                  className={`p-2.5 rounded-xl border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    screenshotMode === 'video_frame' ? 'bg-emerald-600 text-white border-amber-300 shadow-md' : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <Video className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Video Frame</span>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => alert(`Captured ${screenshotMode} screenshot.`)}
+                  className="w-full py-2 bg-emerald-950 text-emerald-300 border border-emerald-600/60 rounded-xl font-bold text-[12px] hover:bg-emerald-900 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Capture Screenshot Preview</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {clipFormat === 'youtube_note' && (
+            <div className="space-y-3">
+              {!isYouTubePage ? (
+                <div className="p-3.5 bg-amber-950/80 border border-amber-500/60 rounded-2xl text-[12px] text-amber-200 font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Open a YouTube video to use YouTube Note.</span>
+                </div>
+              ) : (
+                <div className="p-3 bg-[#12161f] border border-red-500/30 rounded-2xl space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1">
+                      <Youtube className="w-3.5 h-3.5 text-red-400" />
+                      <span>YouTube Note Controls</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-amber-300 bg-black/40 px-2 py-0.5 rounded border border-slate-800">
+                      Timestamp: {ytTimestamp}
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">Timestamped Note</label>
+                    <input
+                      type="text"
+                      placeholder="Add note at current timestamp..."
+                      value={ytNoteInput}
+                      onChange={(e) => setYtNoteInput(e.target.value)}
+                      className="w-full h-8 px-2.5 bg-[#080b0f] border border-slate-800 rounded-lg text-[12px] text-slate-100 outline-none focus:border-red-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => alert(`Added YouTube timestamp bookmark at ${ytTimestamp}`)}
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Bookmark className="w-3 h-3 text-amber-300" />
+                      <span>Bookmark</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => alert(`Captured video frame at ${ytTimestamp}`)}
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Camera className="w-3 h-3 text-amber-300" />
+                      <span>Frame</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => alert('Extracting YouTube video transcript...')}
+                      className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <FileText className="w-3 h-3 text-emerald-400" />
+                      <span>Transcript</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {clipFormat === 'bookmark' && (
+            <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-2">
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
+                Bookmark Link Preview
+              </span>
+              <div className="p-2.5 bg-[#080b0f] border border-slate-800 rounded-xl space-y-1">
+                <p className="font-bold text-[12px] text-slate-100 truncate">{pageTitle}</p>
+                <p className="text-[11px] text-emerald-400 font-mono truncate">{url}</p>
+                <p className="text-[11px] text-slate-400 line-clamp-2">
+                  Bookmark will preserve the canonical link, metadata, domain info, and your personal remarks.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {clipFormat === 'full_page' && (
+            <div className="p-3 bg-[#12161f] border border-emerald-500/30 rounded-2xl space-y-2.5">
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider block">
+                Full Page Capture Toggles
+              </span>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold">
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeImages}
+                    onChange={(e) => setIncludeImages(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Images</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeLinks}
+                    onChange={(e) => setIncludeLinks(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Links</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeTables}
+                    onChange={(e) => setIncludeTables(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Tables</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2 bg-[#080b0f] border border-slate-800 rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeAnnotations}
+                    onChange={(e) => setIncludeAnnotations(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                  />
+                  <span>Include Annotations</span>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* D. DESTINATION CONTROLS */}
+        <div className="bg-[#161920] border border-slate-800 rounded-xl p-3 space-y-2.5 shadow-md">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Destination Controls</span>
+            </h3>
+
+            <div className="flex items-center gap-1 bg-[#0F1115] p-0.5 rounded-lg border border-slate-800 text-[10px] font-semibold">
+              <button
+                type="button"
+                onClick={() => setDestMode('new')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  destMode === 'new' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                New Note
+              </button>
+              <button
+                type="button"
+                onClick={() => setDestMode('existing')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  destMode === 'existing' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Existing Note
+              </button>
+            </div>
+          </div>
+
+          {destMode === 'existing' ? (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search existing notes to append..."
+                  value={targetNoteSearch}
+                  onChange={(e) => setTargetNoteSearch(e.target.value)}
+                  className="w-full pl-8 pr-2.5 h-8 bg-[#0F1115] border border-slate-800 rounded-lg text-[12px] text-slate-100 outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg border border-slate-800 p-1 bg-[#0F1115]">
+                {existingNotes
+                  .filter((n) => n.title.toLowerCase().includes(targetNoteSearch.toLowerCase()))
+                  .map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => setTargetNoteId(n.id)}
+                      className={`w-full text-left px-2 py-1 rounded text-[11px] truncate flex items-center justify-between cursor-pointer ${
+                        targetNoteId === n.id ? 'bg-emerald-950 text-amber-300 font-bold border border-emerald-500/50' : 'hover:bg-slate-800/60 text-slate-300'
+                      }`}
+                      title={n.title}
+                    >
+                      <span className="truncate pr-2">{n.title}</span>
+                      {targetNoteId === n.id && <Check className="w-3.5 h-3.5 text-amber-300 shrink-0" />}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {/* Note Title Input */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-0.5">Note title</label>
+                <input
+                  type="text"
+                  value={noteTitle}
+                  onChange={(e) => setNoteTitle(e.target.value)}
+                  className="w-full h-9 px-2.5 bg-[#0F1115] border border-slate-800 rounded-lg font-bold text-[12px] text-slate-100 outline-none focus:border-emerald-500 transition-colors truncate"
+                  title={noteTitle}
+                />
+              </div>
+
+              {/* Notebook Dropdown */}
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="text-[11px] font-bold text-slate-400">Notebook</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddNotebookInput(!showAddNotebookInput)}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Create</span>
+                  </button>
+                </div>
+
+                {showAddNotebookInput ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Notebook name..."
+                      value={newNotebookName}
+                      onChange={(e) => setNewNotebookName(e.target.value)}
+                      className="flex-1 h-8 px-2 bg-[#0F1115] border border-slate-800 rounded text-[11px] outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateNewNotebook}
+                      className="px-2.5 h-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[11px] cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedNotebookId}
+                    onChange={(e) => handleSelectNotebook(e.target.value)}
+                    className="w-full h-9 px-2.5 bg-[#0F1115] border border-slate-800 rounded-lg text-[12px] font-semibold text-slate-200 outline-none focus:border-emerald-500 transition-colors cursor-pointer truncate"
+                    title={notebooks.find((nb) => nb.id === selectedNotebookId)?.name || 'Notebook'}
+                  >
+                    {notebooks.map((nb) => (
+                      <option key={nb.id} value={nb.id} title={nb.name}>
+                        📓 {nb.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Folder Dropdown */}
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="text-[11px] font-bold text-slate-400">Folder</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddFolderInput(!showAddFolderInput)}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Create</span>
+                  </button>
+                </div>
+
+                {showAddFolderInput ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Folder name..."
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      className="flex-1 h-8 px-2 bg-[#0F1115] border border-slate-800 rounded text-[11px] outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateNewFolder}
+                      className="px-2.5 h-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[11px] cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedFolderId}
+                    onChange={(e) => handleSelectFolder(e.target.value)}
+                    className="w-full h-9 px-2.5 bg-[#0F1115] border border-slate-800 rounded-lg text-[12px] font-semibold text-slate-200 outline-none focus:border-emerald-500 transition-colors cursor-pointer truncate"
+                    title={filteredFolders.find((f) => f.id === selectedFolderId)?.name || 'Folder'}
+                  >
+                    <option value="">(Optional) Choose folder...</option>
+                    {filteredFolders.map((f) => (
+                      <option key={f.id} value={f.id} title={f.name}>
+                        📁 {f.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Tags Picker */}
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <label className="text-[11px] font-bold text-slate-400">Tags</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTagInput(!showAddTagInput)}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Create</span>
+                  </button>
+                </div>
+
+                {showAddTagInput && (
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <input
+                      type="text"
+                      placeholder="Tag name..."
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      className="flex-1 h-8 px-2 bg-[#0F1115] border border-slate-800 rounded text-[11px] outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateNewTag}
+                      className="px-2.5 h-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[11px] cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-1.5 p-2 bg-[#0F1115] border border-slate-800 rounded-lg max-h-20 overflow-y-auto">
+                  {tags.map((t) => {
+                    const isSel = selectedTagIds.includes(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        title={`#${t.name}`}
+                        onClick={() => toggleTag(t.id)}
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border transition-all flex items-center gap-1 cursor-pointer truncate max-w-[120px] ${
+                          isSel
+                            ? 'bg-emerald-500/20 text-amber-300 border-emerald-500/50'
+                            : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        <span className="truncate">#{t.name}</span>
+                        {isSel && <Check className="w-3 h-3 text-amber-300 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Add remark */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-0.5">Add remark</label>
+                <textarea
+                  rows={2}
+                  placeholder="Add personal remark, summary, or citation notes..."
+                  value={noteRemark}
+                  onChange={(e) => setNoteRemark(e.target.value)}
+                  className="w-full p-2 bg-[#0F1115] border border-slate-800 rounded-lg text-[12px] text-slate-200 placeholder:text-slate-500 outline-none focus:border-emerald-500 transition-colors resize-none"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 10. SINGLE PRIMARY SAVE CLIP BUTTON (Sticky at bottom of scroll area) */}
+        <div className="sticky bottom-0 z-20 pt-2 pb-1 bg-[#0c1319]/95 backdrop-blur-md border-t border-slate-800/80 shrink-0">
+          {savedNoteId ? (
+            <div className="space-y-2">
+              <div className="bg-emerald-950/90 border border-emerald-500/80 p-2.5 rounded-xl text-center font-extrabold text-[13px] text-amber-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                <CheckCircle2 className="w-4.5 h-4.5 text-amber-400" />
+                <span>Clip Saved to Smart Notes</span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => onOpenSmartNotesNote(savedNoteId)}
+                  className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg flex items-center justify-center gap-1 shadow-md transition-all col-span-1 cursor-pointer"
+                >
+                  <span>Open Note</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Undo</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <button
+                type="button"
+                data-testid="save-clip"
+                onClick={() => handlePrimarySave(false)}
+                disabled={isSaving}
+                className="w-full h-[44px] bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-[14px] rounded-xl shadow-[0_0_18px_rgba(16,185,129,0.4)] border border-amber-300/40 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+              >
+                {isSaving ? (
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-amber-300" />
+                    <span className="text-amber-200 font-bold">{saveStepMessage || 'Preparing clip...'}</span>
+                  </div>
+                ) : (
+                  <>
+                    <Sparkles className="w-4.5 h-4.5 text-amber-300 fill-amber-300/40" />
+                    <span>Save Clip</span>
+                  </>
+                )}
+              </button>
+
+              {saveError && (
+                <div className="mt-1.5 p-2 bg-red-950/80 border border-red-500/60 rounded-lg text-[11px] text-red-200 flex items-center gap-1.5 font-medium">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{saveError}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {workspaceMode === 'annotation' ? (
-        /* Webpage Annotation Panel Mode */
-        <div className="clipper-content p-3 space-y-3">
-          <AnnotationPanel
-            notebooks={notebooks}
-            folders={folders}
-            tags={tags}
-            existingNotes={existingNotes}
-            onSaveNote={onSaveNote}
-            onCreateNotebook={onCreateNotebook}
-            onCreateFolder={onCreateFolder}
-            onCreateTag={onCreateTag}
-            onOpenSmartNotesNote={onOpenSmartNotesNote}
-            isFloatingOverlay={false}
-            pageTitle={pageTitle}
-            pageUrl={url}
-          />
-        </div>
-      ) : (
-        /* Standard Page Clip Mode */
-        <div className="clipper-content space-y-4">
-          
-          {/* PAGE INFORMATION CARD */}
-          <div className="bg-[#161920] border border-slate-800 rounded-2xl p-3.5 flex items-start gap-3 shadow-md hover:border-slate-700 transition-colors">
-            <div className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
-              <img
-                src={faviconUrl}
-                alt="Favicon"
-                className="w-4 h-4 object-contain"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-              <Globe className="w-4 h-4 text-emerald-400 hidden" />
-            </div>
-
-            <div className="flex-1 min-w-0">
-              <h2 className="font-bold text-[14px] text-slate-100 line-clamp-3 leading-snug">
-                {pageTitle}
-              </h2>
-              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className="text-[12px] text-emerald-400 font-mono font-medium truncate">
-                  {domainName()}
-                </span>
-                {author && <span className="text-[12px] text-slate-500">• {author}</span>}
-                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-extrabold uppercase tracking-wider">
-                  {pageContext}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* CLIPPING OPTIONS */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[13px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <span>Clipping Options</span>
-              </h3>
-            </div>
-
-            <div className="space-y-1.5">
-              {allFormats.map((fmt) => {
-                const isSelected = clipFormat === fmt.id;
-                return (
-                  <button
-                    key={fmt.id}
-                    onClick={() => {
-                      setClipFormat(fmt.id);
-                      setSavedNoteId(null);
-                    }}
-                    className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border text-left flex items-center justify-between transition-all ${
-                      isSelected
-                        ? 'bg-emerald-950/90 border-emerald-500/90 text-white shadow-[0_0_15px_rgba(16,185,129,0.2)]'
-                        : 'bg-[#161920] border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-[#1C202B]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`p-1.5 rounded-lg shrink-0 ${isSelected ? 'bg-emerald-500/20 text-amber-300' : 'bg-slate-900 text-slate-400'}`}>
-                        {fmt.icon}
-                      </div>
-                      <div className="min-w-0">
-                        <p className={`font-bold text-[14px] truncate ${isSelected ? 'text-amber-300' : 'text-slate-100'}`}>
-                          {fmt.label}
-                        </p>
-                        <p className="text-[12px] text-slate-400 truncate">{fmt.description}</p>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 ml-2">
-                      {isSelected ? (
-                        <div className="w-5 h-5 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-sm">
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        </div>
-                      ) : (
-                        <div className="w-4 h-4 rounded-full border border-slate-700" />
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* DESTINATION & DETAILS FIELDS */}
-          <div className="bg-[#161920] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-md">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[13px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <BookOpen className="w-4 h-4 text-emerald-400" />
-                <span>Destination Controls</span>
-              </h3>
-
-              <div className="flex items-center gap-1 bg-[#0F1115] p-1 rounded-xl border border-slate-800 text-[11px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setDestMode('new')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
-                    destMode === 'new' ? 'bg-emerald-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  New Note
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDestMode('existing')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
-                    destMode === 'existing' ? 'bg-emerald-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Existing Note
-                </button>
-              </div>
-            </div>
-
-            {destMode === 'existing' ? (
-              <div className="space-y-2">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="Search existing notes to append..."
-                    value={targetNoteSearch}
-                    onChange={(e) => setTargetNoteSearch(e.target.value)}
-                    className="w-full pl-9 pr-3 h-[42px] bg-[#0F1115] border border-slate-800 rounded-xl text-[14px] text-slate-100 outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div className="max-h-36 overflow-y-auto space-y-1 rounded-xl border border-slate-800 p-1 bg-[#0F1115]">
-                  {existingNotes
-                    .filter((n) => n.title.toLowerCase().includes(targetNoteSearch.toLowerCase()))
-                    .map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                        onClick={() => setTargetNoteId(n.id)}
-                        className={`w-full text-left p-2 rounded-lg text-[13px] flex items-center justify-between ${
-                          targetNoteId === n.id ? 'bg-emerald-950 text-amber-300 font-bold border border-emerald-500/50' : 'hover:bg-slate-800/60 text-slate-300'
-                        }`}
-                      >
-                        <span className="truncate pr-2">{n.title}</span>
-                        {targetNoteId === n.id && <Check className="w-4 h-4 text-amber-300" />}
-                      </button>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {/* Note Title Input */}
-                <div>
-                  <label className="text-[12px] font-bold text-slate-300 block mb-1">Note title</label>
-                  <input
-                    type="text"
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    className="w-full h-[42px] px-3.5 bg-[#0F1115] border border-slate-800 rounded-xl font-bold text-[14px] text-slate-100 outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-
-                {/* Notebook Dropdown */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[12px] font-bold text-slate-300">Notebook</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddNotebookInput(!showAddNotebookInput)}
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Create notebook</span>
-                    </button>
-                  </div>
-
-                  {showAddNotebookInput ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Notebook name..."
-                        value={newNotebookName}
-                        onChange={(e) => setNewNotebookName(e.target.value)}
-                        className="flex-1 h-[42px] px-3 bg-[#0F1115] border border-slate-800 rounded-xl text-[13px] outline-none focus:border-emerald-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateNewNotebook}
-                        className="px-3.5 h-[42px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[13px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedNotebookId}
-                      onChange={(e) => handleSelectNotebook(e.target.value)}
-                      className="w-full h-[42px] px-3.5 bg-[#0F1115] border border-slate-800 rounded-xl text-[14px] font-semibold text-slate-200 outline-none focus:border-emerald-500 transition-colors"
-                    >
-                      <option value="">Choose notebook...</option>
-                      {notebooks.map((nb) => (
-                        <option key={nb.id} value={nb.id} title={nb.name}>
-                          📓 {nb.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {/* Folder Dropdown */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[12px] font-bold text-slate-300">Folder</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddFolderInput(!showAddFolderInput)}
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Create folder</span>
-                    </button>
-                  </div>
-
-                  {showAddFolderInput ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Folder name..."
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        className="flex-1 h-[42px] px-3 bg-[#0F1115] border border-slate-800 rounded-xl text-[13px] outline-none focus:border-emerald-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateNewFolder}
-                        className="px-3.5 h-[42px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[13px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedFolderId}
-                      onChange={(e) => handleSelectFolder(e.target.value)}
-                      className="w-full h-[42px] px-3.5 bg-[#0F1115] border border-slate-800 rounded-xl text-[14px] font-semibold text-slate-200 outline-none focus:border-emerald-500 transition-colors"
-                    >
-                      <option value="">(Optional) Choose folder...</option>
-                      {filteredFolders.map((f) => (
-                        <option key={f.id} value={f.id} title={f.name}>
-                          📁 {f.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {/* Tags Picker */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[12px] font-bold text-slate-300">Tags</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddTagInput(!showAddTagInput)}
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Create tag</span>
-                    </button>
-                  </div>
-
-                  {showAddTagInput ? (
-                    <div className="flex items-center gap-2 mb-2">
-                      <input
-                        type="text"
-                        placeholder="Tag name..."
-                        value={newTagName}
-                        onChange={(e) => setNewTagName(e.target.value)}
-                        className="flex-1 h-[42px] px-3 bg-[#0F1115] border border-slate-800 rounded-xl text-[13px] outline-none focus:border-emerald-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateNewTag}
-                        className="px-3.5 h-[42px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[13px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <div className="flex flex-wrap gap-1.5 p-2 bg-[#0F1115] border border-slate-800 rounded-xl max-h-24 overflow-y-auto">
-                    {tags.map((t) => {
-                      const isSel = selectedTagIds.includes(t.id);
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => toggleTag(t.id)}
-                          className={`text-[11px] px-2.5 py-1 rounded-full font-semibold border transition-all flex items-center gap-1 ${
-                            isSel
-                              ? 'bg-emerald-500/20 text-amber-300 border-emerald-500/50'
-                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>#{t.name}</span>
-                          {isSel && <Check className="w-3 h-3 text-amber-300" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Add a remark / comment */}
-                <div>
-                  <label className="text-[12px] font-bold text-slate-300 block mb-1">Add remark</label>
-                  <textarea
-                    rows={3}
-                    placeholder="Add personal remark, summary, or citation notes..."
-                    value={noteComment}
-                    onChange={(e) => setNoteComment(e.target.value)}
-                    className="w-full p-3 bg-[#0F1115] border border-slate-800 rounded-xl text-[14px] text-slate-200 placeholder:text-slate-500 outline-none focus:border-emerald-500 transition-colors"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ADVANCED OPTIONS */}
-          <div className="border border-slate-800 rounded-2xl overflow-hidden bg-[#161920]">
-            <button
-              type="button"
-              onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
-              className="w-full px-4 py-3 text-[13px] font-bold text-slate-300 flex items-center justify-between hover:bg-slate-800/40 transition-colors"
-            >
-              <span className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-emerald-400" />
-                <span>Advanced Options</span>
-              </span>
-              {showAdvancedOptions ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-            </button>
-
-            {showAdvancedOptions && (
-              <div className="p-4 pt-1 border-t border-slate-800 space-y-2.5 text-[12px] text-slate-300">
-                {(
-                  [
-                    ['includeSourceLink', 'Include source link'],
-                    ['includeMetadata', 'Include page metadata'],
-                    ['includeImages', 'Include images'],
-                    ['includeAnnotations', 'Include annotations'],
-                    ['includeTranscript', 'Include transcript'],
-                    ['includeScreenshots', 'Include screenshots'],
-                    ['keepOfflineCopy', 'Keep offline copy'],
-                    ['saveAsMarkdown', 'Save as Markdown'],
-                    ['saveAsEditableWebClip', 'Save as editable web clip'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key} className="flex items-center justify-between cursor-pointer group">
-                    <span className="group-hover:text-white font-medium">{label}</span>
-                    <input
-                      type="checkbox"
-                      checked={advOptions[key]}
-                      onChange={(e) => setAdvOptions({ ...advOptions, [key]: e.target.checked })}
-                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
-                    />
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* STICKY BOTTOM MAIN SAVE CLIP BUTTON */}
-          <div className="p-4 bg-[#0F1115] border-t border-slate-800/90 space-y-2.5 shrink-0 shadow-2xl">
-            {savedNoteId ? (
-              <div className="space-y-2.5">
-                <div className="bg-emerald-950/90 border border-emerald-500/60 p-3 rounded-xl text-center text-[13px] font-bold text-amber-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                  <CheckCircle2 className="w-4.5 h-4.5 text-amber-400" />
-                  <span>Clip Saved to Smart Notes</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-[12px] font-bold">
-                  <button
-                    type="button"
-                    onClick={() => onOpenSmartNotesNote(savedNoteId)}
-                    className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1 shadow-sm transition-all col-span-1"
-                  >
-                    <span>Open Note</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyLink}
-                    className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center justify-center gap-1 transition-all"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-amber-300" />
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleUndo}
-                    className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center justify-center gap-1 transition-all"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Undo</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => handlePrimarySave(false)}
-                  disabled={isSaving}
-                  className="w-full h-[48px] bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-extrabold text-[15px] rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.35)] border border-amber-300/40 flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-75 cursor-pointer"
-                >
-                  {isSaving ? (
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4.5 h-4.5 animate-spin text-amber-300" />
-                      <span className="text-amber-200 font-bold">{saveStepMessage || 'Preparing clip...'}</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5 text-amber-300 fill-amber-300/40" />
-                      <span>Save Clip</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* FOOTER */}
-      <footer className="h-9 px-4 bg-[#0A0C0E] border-t border-slate-800/90 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+      <footer className="h-8 px-4 bg-[#0A0C0E] border-t border-slate-800/90 flex items-center justify-between text-[10px] text-slate-400 shrink-0">
         <div className="flex items-center gap-1.5">
-          <div className="w-4 h-4 rounded-full bg-emerald-700 text-amber-300 font-bold text-[9px] flex items-center justify-center">
+          <div className="w-3.5 h-3.5 rounded-full bg-emerald-700 text-amber-300 font-bold text-[8px] flex items-center justify-center">
             E
           </div>
-          <span className="truncate max-w-[140px] font-medium text-slate-300">euclid-projects v1.0</span>
+          <span className="truncate font-medium text-slate-300">euclid-projects v1.0</span>
         </div>
 
-        <div className="flex items-center gap-2.5 font-medium">
-          <span className="text-emerald-400">Synced</span>
+        <div className="flex items-center gap-2 font-medium">
+          <span className="text-emerald-400">Synced to Smart Notes</span>
         </div>
       </footer>
     </div>

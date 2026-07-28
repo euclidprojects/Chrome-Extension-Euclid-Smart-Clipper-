@@ -71,6 +71,8 @@ export interface AnnotationPanelProps {
   pageTitle?: string;
   pageUrl?: string;
   isUnsupportedPage?: boolean;
+  hideHeaderAndSave?: boolean;
+  hideDestinationControls?: boolean;
 }
 
 export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
@@ -88,6 +90,8 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
   pageTitle: propPageTitle = 'Euclid — Father of Geometry & Axiomatic Systems',
   pageUrl: propPageUrl = 'https://en.wikipedia.org/wiki/Euclid',
   isUnsupportedPage = false,
+  hideHeaderAndSave = false,
+  hideDestinationControls = false,
 }) => {
   // Floating Window Position & Collapse State
   const [panelPos, setPanelPos] = useState(() => {
@@ -344,7 +348,7 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
         canonicalUrl: pageUrl,
         sourceTitle: pageTitle,
         sourceDomain: new URL(pageUrl || 'https://notes.app.euclidprojects.org').hostname,
-        clipFormat: 'simplified',
+        clipFormat: 'webpage_annotation',
         annotations: annotations,
         wordCount: extractedArticle.wordCount || 120,
         readingTime: 1,
@@ -413,125 +417,126 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
       }
     >
       {/* 1. HEADER (Dark Green / Emerald Header with Yellow Accents) */}
-      <div
-        onMouseDown={handleMouseDownHeader}
-        className="px-4 py-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/70 flex items-center justify-between cursor-move shrink-0"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 border border-amber-300/80 shadow-[0_0_10px_rgba(251,191,36,0.3)] flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4 text-amber-300" />
+      {!hideHeaderAndSave && isFloatingOverlay && (
+        <div
+          onMouseDown={handleMouseDownHeader}
+          className="px-4 py-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/70 flex items-center justify-between cursor-move shrink-0"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 border border-amber-300/80 shadow-[0_0_10px_rgba(251,191,36,0.3)] flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 text-amber-300" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-[15px] text-white tracking-tight flex items-center gap-1.5 leading-tight">
+                <span>Euclid Smart Clipper</span>
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#facc15]" />
+              </h3>
+            </div>
           </div>
-          <div>
-            <h3 className="font-extrabold text-[15px] text-white tracking-tight flex items-center gap-1.5 leading-tight">
-              <span>Euclid Smart Clipper</span>
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#facc15]" />
-            </h3>
-            <p className="text-[11px] text-emerald-300/90 font-medium truncate max-w-[200px]">
-              {pageTitle}
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-1">
-          {isFloatingOverlay && (
-            <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors"
-              title={isCollapsed ? 'Expand Panel' : 'Collapse Panel'}
-            >
-              {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            </button>
-          )}
-          {onClosePanel && (
-            <button
-              onClick={onClosePanel}
-              className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors"
-              title="Close Annotation Panel"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center gap-1">
+            {isFloatingOverlay && (
+              <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors"
+                title={isCollapsed ? 'Expand Panel' : 'Collapse Panel'}
+              >
+                {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              </button>
+            )}
+            {onClosePanel && (
+              <button
+                onClick={onClosePanel}
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors"
+                title="Close Annotation Panel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {!isCollapsed && (
         <div className="flex flex-col max-h-[calc(100vh-100px)] overflow-y-auto divide-y divide-slate-800/80">
           
           {/* 2. STICKY TOP MAIN SAVE CLIP BUTTON (Emerald-green background, white text, yellow save icon, 48px height) */}
-          <div className="sticky top-0 z-20 p-3.5 bg-[#0a1015]/95 backdrop-blur-md border-b border-emerald-800/50 space-y-2 shrink-0">
-            {savedNoteId ? (
-              /* Success State Display */
-              <div className="space-y-2">
-                <div className="bg-emerald-950/90 border border-emerald-500/80 p-3 rounded-xl text-center font-extrabold text-[14px] text-amber-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-                  <CheckCircle2 className="w-5 h-5 text-amber-400" />
-                  <span>Clip Saved to Smart Notes</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[12px] font-bold">
-                  <button
-                    onClick={() => onOpenSmartNotesNote(savedNoteId)}
-                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all col-span-1"
-                  >
-                    <span>Open Note</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
-
-                  <button
-                    onClick={handleCopyNoteLink}
-                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center justify-center gap-1.5 transition-all col-span-1"
-                  >
-                    <Copy className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
-                  </button>
-
-                  <button
-                    onClick={handleContinueAnnotating}
-                    className="py-2 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center justify-center gap-1 transition-all col-span-1 text-[11px]"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Continue Annotating</span>
-                  </button>
-
-                  <button
-                    onClick={handleUndoSave}
-                    className="py-2 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center justify-center gap-1 transition-all col-span-1 text-[11px]"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Undo Save</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* Primary Active Save Clip Button */
-              <div>
-                <button
-                  type="button"
-                  onClick={() => handleSaveClip('cloud')}
-                  disabled={isSaving || isUnsupportedPage}
-                  className="w-full h-[48px] bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-[15px] rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] border border-amber-300/40 flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
-                >
-                  {isSaving ? (
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4.5 h-4.5 animate-spin text-amber-300" />
-                      <span className="text-amber-200 font-bold">{saveStepMessage || 'Preparing clip…'}</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5 text-amber-300 fill-amber-300/40" />
-                      <span>Save Clip</span>
-                    </>
-                  )}
-                </button>
-
-                {saveError && (
-                  <div className="mt-2 p-2 bg-red-950/80 border border-red-500/60 rounded-xl text-[11px] text-red-200 flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{saveError}</span>
+          {!hideHeaderAndSave && (
+            <div className="sticky top-0 z-20 p-3.5 bg-[#0a1015]/95 backdrop-blur-md border-b border-emerald-800/50 space-y-2 shrink-0">
+              {savedNoteId ? (
+                /* Success State Display */
+                <div className="space-y-2">
+                  <div className="bg-emerald-950/90 border border-emerald-500/80 p-3 rounded-xl text-center font-extrabold text-[14px] text-amber-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                    <CheckCircle2 className="w-5 h-5 text-amber-400" />
+                    <span>Clip Saved to Smart Notes</span>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[12px] font-bold">
+                    <button
+                      onClick={() => onOpenSmartNotesNote(savedNoteId)}
+                      className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5 shadow-md transition-all col-span-1"
+                    >
+                      <span>Open Note</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={handleCopyNoteLink}
+                      className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl flex items-center justify-center gap-1.5 transition-all col-span-1"
+                    >
+                      <Copy className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+                    </button>
+
+                    <button
+                      onClick={handleContinueAnnotating}
+                      className="py-2 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center justify-center gap-1 transition-all col-span-1 text-[11px]"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Continue Annotating</span>
+                    </button>
+
+                    <button
+                      onClick={handleUndoSave}
+                      className="py-2 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl flex items-center justify-center gap-1 transition-all col-span-1 text-[11px]"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Undo Save</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Primary Active Save Clip Button */
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveClip('cloud')}
+                    disabled={isSaving || isUnsupportedPage}
+                    className="w-full h-[48px] bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-600 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-[15px] rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.4)] border border-amber-300/40 flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+                  >
+                    {isSaving ? (
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="w-4.5 h-4.5 animate-spin text-amber-300" />
+                        <span className="text-amber-200 font-bold">{saveStepMessage || 'Preparing clip…'}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5 text-amber-300 fill-amber-300/40" />
+                        <span>Save Clip</span>
+                      </>
+                    )}
+                  </button>
+
+                  {saveError && (
+                    <div className="mt-2 p-2 bg-red-950/80 border border-red-500/60 rounded-xl text-[11px] text-red-200 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                      <span>{saveError}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* UNSUPPORTED PAGE NOTICE */}
           {isUnsupportedPage && (
@@ -548,7 +553,7 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
               <span className="text-amber-400 font-mono">23 Tools</span>
             </div>
 
-            <div className="grid grid-cols-6 gap-1 bg-[#070b0e] p-1.5 rounded-xl border border-slate-800">
+            <div className="grid grid-cols-5 gap-1.5 bg-[#070b0e] p-1.5 rounded-xl border border-slate-800">
               {/* 1. Text Highlight */}
               <button
                 onClick={() => setActiveTool('highlight')}
@@ -912,216 +917,218 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
           </div>
 
           {/* 7. DESTINATION CONTROLS (Notebook, Folder, Tags, Note Title) */}
-          <div className="p-3 space-y-3 bg-[#0d151c]">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-bold text-slate-300 flex items-center gap-1.5">
-                <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Destination Controls</span>
-              </span>
+          {!hideDestinationControls && (
+            <div className="p-3 space-y-3 bg-[#0d151c]">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-bold text-slate-300 flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Destination Controls</span>
+                </span>
 
-              <div className="flex items-center gap-1 bg-[#060a0e] p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
-                <button
-                  onClick={() => setDestMode('create_new')}
-                  className={`px-2 py-0.5 rounded ${destMode === 'create_new' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
-                >
-                  New Note
-                </button>
-                <button
-                  onClick={() => setDestMode('add_to_existing')}
-                  className={`px-2 py-0.5 rounded ${destMode === 'add_to_existing' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
-                >
-                  Existing Note
-                </button>
-              </div>
-            </div>
-
-            {destMode === 'add_to_existing' ? (
-              <div className="space-y-1.5">
-                <input
-                  type="text"
-                  placeholder="Search existing notes..."
-                  value={targetNoteSearch}
-                  onChange={(e) => setTargetNoteSearch(e.target.value)}
-                  className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500"
-                />
-                <div className="max-h-24 overflow-y-auto space-y-1 rounded-lg border border-slate-800 p-1 bg-[#060a0e]">
-                  {existingNotes
-                    .filter((n) => n.title.toLowerCase().includes(targetNoteSearch.toLowerCase()))
-                    .map((n) => (
-                      <button
-                        key={n.id}
-                        onClick={() => setTargetNoteId(n.id)}
-                        className={`w-full text-left px-2 py-1 rounded text-[11px] truncate ${
-                          targetNoteId === n.id ? 'bg-emerald-950 text-amber-300 font-bold' : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        {n.title}
-                      </button>
-                    ))}
+                <div className="flex items-center gap-1 bg-[#060a0e] p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
+                  <button
+                    onClick={() => setDestMode('create_new')}
+                    className={`px-2 py-0.5 rounded ${destMode === 'create_new' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                  >
+                    New Note
+                  </button>
+                  <button
+                    onClick={() => setDestMode('add_to_existing')}
+                    className={`px-2 py-0.5 rounded ${destMode === 'add_to_existing' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                  >
+                    Existing Note
+                  </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-2.5">
-                {/* Note Title */}
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 block mb-0.5">Note Title</label>
+
+              {destMode === 'add_to_existing' ? (
+                <div className="space-y-1.5">
                   <input
                     type="text"
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-100 font-bold outline-none focus:border-emerald-500"
+                    placeholder="Search existing notes..."
+                    value={targetNoteSearch}
+                    onChange={(e) => setTargetNoteSearch(e.target.value)}
+                    className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500"
                   />
-                </div>
-
-                {/* Notebook Selector */}
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-bold text-slate-400">Notebook</label>
-                    <button
-                      onClick={() => setShowNewNotebookInput(!showNewNotebookInput)}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Create</span>
-                    </button>
-                  </div>
-
-                  {showNewNotebookInput ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        placeholder="New notebook name..."
-                        value={newNotebookName}
-                        onChange={(e) => setNewNotebookName(e.target.value)}
-                        className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
-                      />
-                      <button
-                        onClick={handleCreateNotebook}
-                        className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedNotebookId}
-                      onChange={(e) => {
-                        setSelectedNotebookId(e.target.value);
-                        localStorage.setItem('euclid_last_notebook', e.target.value);
-                      }}
-                      className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500 font-semibold"
-                    >
-                      {notebooks.map((nb) => (
-                        <option key={nb.id} value={nb.id}>
-                          📓 {nb.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {/* Folder Selector */}
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-bold text-slate-400">Folder</label>
-                    <button
-                      onClick={() => setShowNewFolderInput(!showNewFolderInput)}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Create</span>
-                    </button>
-                  </div>
-
-                  {showNewFolderInput ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        placeholder="New folder name..."
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
-                      />
-                      <button
-                        onClick={handleCreateFolder}
-                        className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedFolderId}
-                      onChange={(e) => {
-                        setSelectedFolderId(e.target.value);
-                        localStorage.setItem('euclid_last_folder', e.target.value);
-                      }}
-                      className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500"
-                    >
-                      <option value="">(Optional) Folder...</option>
-                      {filteredFolders.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          📁 {f.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                {/* Tags Picker */}
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-bold text-slate-400">Tags</label>
-                    <button
-                      onClick={() => setShowNewTagInput(!showNewTagInput)}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Create</span>
-                    </button>
-                  </div>
-
-                  {showNewTagInput && (
-                    <div className="flex items-center gap-1 mb-1.5">
-                      <input
-                        type="text"
-                        placeholder="New tag name..."
-                        value={newTagName}
-                        onChange={(e) => setNewTagName(e.target.value)}
-                        className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
-                      />
-                      <button
-                        onClick={handleCreateTag}
-                        className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-1 p-1.5 bg-[#060a0e] border border-slate-800 rounded-lg max-h-20 overflow-y-auto">
-                    {tags.map((t) => {
-                      const isSel = selectedTagIds.includes(t.id);
-                      return (
+                  <div className="max-h-24 overflow-y-auto space-y-1 rounded-lg border border-slate-800 p-1 bg-[#060a0e]">
+                    {existingNotes
+                      .filter((n) => n.title.toLowerCase().includes(targetNoteSearch.toLowerCase()))
+                      .map((n) => (
                         <button
-                          key={t.id}
-                          onClick={() => toggleTag(t.id)}
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border transition-all flex items-center gap-0.5 ${
-                            isSel
-                              ? 'bg-emerald-500/20 text-amber-300 border-emerald-500/50'
-                              : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                          key={n.id}
+                          onClick={() => setTargetNoteId(n.id)}
+                          className={`w-full text-left px-2 py-1 rounded text-[11px] truncate ${
+                            targetNoteId === n.id ? 'bg-emerald-950 text-amber-300 font-bold' : 'hover:bg-slate-800 text-slate-300'
                           }`}
                         >
-                          <span>#{t.name}</span>
-                          {isSel && <X className="w-2.5 h-2.5 text-amber-300" />}
+                          {n.title}
                         </button>
-                      );
-                    })}
+                      ))}
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {/* Note Title */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-0.5">Note Title</label>
+                    <input
+                      type="text"
+                      value={noteTitle}
+                      onChange={(e) => setNoteTitle(e.target.value)}
+                      className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-100 font-bold outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Notebook Selector */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-[11px] font-bold text-slate-400">Notebook</label>
+                      <button
+                        onClick={() => setShowNewNotebookInput(!showNewNotebookInput)}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Create</span>
+                      </button>
+                    </div>
+
+                    {showNewNotebookInput ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          placeholder="New notebook name..."
+                          value={newNotebookName}
+                          onChange={(e) => setNewNotebookName(e.target.value)}
+                          className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
+                        />
+                        <button
+                          onClick={handleCreateNotebook}
+                          className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedNotebookId}
+                        onChange={(e) => {
+                          setSelectedNotebookId(e.target.value);
+                          localStorage.setItem('euclid_last_notebook', e.target.value);
+                        }}
+                        className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500 font-semibold"
+                      >
+                        {notebooks.map((nb) => (
+                          <option key={nb.id} value={nb.id}>
+                            📓 {nb.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Folder Selector */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-[11px] font-bold text-slate-400">Folder</label>
+                      <button
+                        onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Create</span>
+                      </button>
+                    </div>
+
+                    {showNewFolderInput ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          placeholder="New folder name..."
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value)}
+                          className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
+                        />
+                        <button
+                          onClick={handleCreateFolder}
+                          className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedFolderId}
+                        onChange={(e) => {
+                          setSelectedFolderId(e.target.value);
+                          localStorage.setItem('euclid_last_folder', e.target.value);
+                        }}
+                        className="w-full h-8 px-2.5 bg-[#060a0e] border border-slate-800 rounded-lg text-[12px] text-slate-200 outline-none focus:border-emerald-500"
+                      >
+                        <option value="">(Optional) Folder...</option>
+                        {filteredFolders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            📁 {f.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Tags Picker */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-[11px] font-bold text-slate-400">Tags</label>
+                      <button
+                        onClick={() => setShowNewTagInput(!showNewTagInput)}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Create</span>
+                      </button>
+                    </div>
+
+                    {showNewTagInput && (
+                      <div className="flex items-center gap-1 mb-1.5">
+                        <input
+                          type="text"
+                          placeholder="New tag name..."
+                          value={newTagName}
+                          onChange={(e) => setNewTagName(e.target.value)}
+                          className="flex-1 h-7 px-2 bg-[#060a0e] border border-slate-800 rounded text-[11px]"
+                        />
+                        <button
+                          onClick={handleCreateTag}
+                          className="px-2 h-7 bg-emerald-600 text-white rounded font-bold text-[11px]"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-1 p-1.5 bg-[#060a0e] border border-slate-800 rounded-lg max-h-20 overflow-y-auto">
+                      {tags.map((t) => {
+                        const isSel = selectedTagIds.includes(t.id);
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => toggleTag(t.id)}
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border transition-all flex items-center gap-0.5 ${
+                              isSel
+                                ? 'bg-emerald-500/20 text-amber-300 border-emerald-500/50'
+                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                            }`}
+                          >
+                            <span>#{t.name}</span>
+                            {isSel && <X className="w-2.5 h-2.5 text-amber-300" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
         </div>
       )}

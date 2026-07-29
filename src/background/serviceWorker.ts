@@ -24,12 +24,10 @@ if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
 // Offscreen Document & Google Authentication Logic
 // ---------------------------------------------------------------------------
 const OFFSCREEN_PATH = "offscreen.html";
-let creatingOffscreen: Promise<void> | null = null;
+let creatingOffscreenDocument: Promise<void> | null = null;
 
 async function ensureOffscreenDocument(): Promise<void> {
-  console.info("[Background] Creating offscreen document");
-  console.info("[Google Auth] 3. Preparing offscreen document");
-
+  console.info("[Background] Ensuring offscreen document");
   const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_PATH);
 
   if (typeof chrome !== 'undefined' && chrome.runtime && 'getContexts' in chrome.runtime) {
@@ -39,32 +37,72 @@ async function ensureOffscreenDocument(): Promise<void> {
       documentUrls: [offscreenUrl],
     });
     if (contexts.length > 0) {
-      console.info("[Background] Offscreen document ready");
-      console.info("[Google Auth] 4. Offscreen document ready");
+      console.info("[Background] Offscreen context found");
       return;
     }
   } else if (chrome.offscreen && 'hasDocument' in chrome.offscreen) {
     // @ts-ignore
     if (await chrome.offscreen.hasDocument()) {
-      console.info("[Background] Offscreen document ready");
-      console.info("[Google Auth] 4. Offscreen document ready");
+      console.info("[Background] Offscreen context found");
       return;
     }
   }
 
-  if (!creatingOffscreen) {
-    creatingOffscreen = chrome.offscreen.createDocument({
+  if (!creatingOffscreenDocument) {
+    creatingOffscreenDocument = chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
       reasons: [(chrome.offscreen.Reason as any)?.IFRAME_SCRIPTING || 'IFRAME_SCRIPTING'],
-      justification: 'Use the hosted Firebase authentication page for Google sign-in.',
+      justification: 'Host the Firebase Google authentication iframe.',
     }).finally(() => {
-      creatingOffscreen = null;
+      creatingOffscreenDocument = null;
     });
+    console.info("[Background] Offscreen document created");
   }
 
-  await creatingOffscreen;
-  console.info("[Background] Offscreen document ready");
-  console.info("[Google Auth] 4. Offscreen document ready");
+  await creatingOffscreenDocument;
+}
+
+async function requestGoogleAuthenticationFromOffscreen(): Promise<any> {
+  await ensureOffscreenDocument();
+
+  const ping = await new Promise<any>((resolve) => {
+    chrome.runtime.sendMessage({ target: "offscreen", type: "PING_OFFSCREEN" }, (res) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false });
+      } else {
+        resolve(res);
+      }
+    });
+  });
+
+  if (!ping?.success) {
+    throw new Error("The offscreen authentication document did not initialize.");
+  }
+  console.info("[Background] Offscreen ping succeeded");
+
+  try {
+    console.info("[Background] Sending Google auth request");
+    const response = await new Promise<any>((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { target: "offscreen", type: "FIREBASE_GOOGLE_SIGN_IN" },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message || "The offscreen authentication document returned no response."));
+          } else if (!res) {
+            reject(new Error("The offscreen authentication document returned no response."));
+          } else {
+            resolve(res);
+          }
+        }
+      );
+    });
+
+    console.info("[Background] Offscreen response received");
+    return response;
+  } catch (error: any) {
+    console.error("[Background] Offscreen request failed", { message: error?.message });
+    throw new Error(error?.message || "Communication with the authentication document failed.");
+  }
 }
 
 async function handleGoogleSignIn(): Promise<{ success: boolean; user?: any; idToken?: string; error?: any }> {
@@ -72,33 +110,7 @@ async function handleGoogleSignIn(): Promise<{ success: boolean; user?: any; idT
     throw new Error('Offscreen API is not supported in this browser environment.');
   }
 
-  await ensureOffscreenDocument();
-
-  console.info("[Background] Sending auth request to offscreen");
-  console.info("[Google Auth] 5. Sending request to offscreen document");
-
-  const response = await new Promise<any>((resolve) => {
-    chrome.runtime.sendMessage(
-      {
-        target: 'offscreen',
-        type: 'FIREBASE_GOOGLE_SIGN_IN'
-      },
-      (res) => {
-        if (chrome.runtime.lastError) {
-          console.error('[Google Auth] Offscreen runtime error:', chrome.runtime.lastError.message);
-          resolve({
-            success: false,
-            error: {
-              code: 'CHROME_RUNTIME_ERROR',
-              message: chrome.runtime.lastError.message || 'The offscreen authentication document returned no response.'
-            }
-          });
-        } else {
-          resolve(res);
-        }
-      }
-    );
-  });
+  const response = await requestGoogleAuthenticationFromOffscreen();
 
   if (!response?.success) {
     const rawErr = response?.error;

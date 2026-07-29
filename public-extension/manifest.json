@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Euclid Smart Clipper",
   "short_name": "Euclid Clipper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Clip, annotate, capture, and save web content to Euclid Smart Notes.",
 
   "icons": {
@@ -33,10 +33,8 @@
     "contextMenus",
     "sidePanel",
     "scripting",
-    "downloads",
     "tabs",
-    "offscreen",
-    "identity"
+    "offscreen"
   ],
 
   "content_security_policy": {

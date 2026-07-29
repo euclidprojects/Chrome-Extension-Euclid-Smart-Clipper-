@@ -64,6 +64,26 @@ export default function PopupApp() {
     return () => unsubscribe();
   }, []);
 
+  // Real-time Firestore Notes Subscription for authenticated user
+  useEffect(() => {
+    if (!user || !user.uid) return;
+
+    const unsubscribe = firebaseSyncService.subscribeToUserNotes(user.uid, async (remoteNotes) => {
+      console.log(`[Smart Notes Popup] Real-time listener received ${remoteNotes.length} notes from Firestore`);
+      for (const remoteNote of remoteNotes) {
+        try {
+          await localNoteRepo.save(remoteNote);
+        } catch (err) {
+          console.warn('[Smart Notes Popup] Local repo merge warning:', err);
+        }
+      }
+      const updatedNotes = await localNoteRepo.getAll();
+      setNotes(updatedNotes);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
   // Sign out handler
   const handleSignOut = async () => {
     await firebaseAuthService.signOut();

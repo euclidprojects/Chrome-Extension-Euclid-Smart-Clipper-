@@ -23,6 +23,8 @@ import {
   EuclidTag,
   EuclidAnnotation,
 } from '../types';
+import { auth } from '../lib/firebase';
+import { firebaseSyncService } from '../services/firebaseService';
 import { DestinationPicker } from './DestinationPicker';
 
 interface ScreenshotAnnotationSuiteProps {
@@ -113,43 +115,72 @@ export const ScreenshotAnnotationSuite: React.FC<ScreenshotAnnotationSuiteProps>
 
   const handleSaveAnnotatedScreenshot = async () => {
     setIsSaving(true);
-    const noteId = 'note_ann_' + Date.now();
-    const canvas = canvasRef.current;
-    const dataUrl = canvas
-      ? canvas.toDataURL('image/png')
-      : 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=1000';
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        alert('Please sign in before saving to Smart Notes.');
+        setIsSaving(false);
+        return;
+      }
 
-    const selectedTagNames = tags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name);
+      const canvas = canvasRef.current;
+      const dataUrl = canvas
+        ? canvas.toDataURL('image/png')
+        : 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=1000';
 
-    const noteToSave: EuclidNote = {
-      id: noteId,
-      user_id: 'local-user',
-      title: 'Annotated Screenshot — Research Overview',
-      content: `
-        <div class="prose max-w-none">
-          <h3>Annotated Screenshot</h3>
-          <p class="text-xs text-slate-500">Source: <a href="https://notes.app.euclidprojects.org/" target="_blank">https://notes.app.euclidprojects.org/</a></p>
-          <img src="${dataUrl}" class="rounded-xl border shadow-lg my-3 w-full"/>
-          <p class="text-xs text-slate-700">Editable annotation paths saved along with flattened image layer.</p>
-        </div>
-      `,
-      plainTextContent: 'Annotated Screenshot saved to Euclid Smart Notes.',
-      markdownContent: `![Annotated Screenshot](${dataUrl})\n\n*Annotated screenshot from webpage*`,
-      notebook_id: selectedNotebookId,
-      folder_id: selectedFolderId || null,
-      tags: selectedTagNames,
-      noteType: 'annotated_screenshot',
-      sourceUrl: 'https://notes.app.euclidprojects.org/',
-      sourceDomain: 'notes.app.euclidprojects.org',
-      extensionCreated: true,
-      syncStatus: 'synced',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+      const selectedTagNames = tags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name);
 
-    await onSaveNote(noteToSave);
-    setIsSaving(false);
-    setSavedNoteId(noteId);
+      const res = await firebaseSyncService.saveScreenshotToSmartNotes({
+        screenshotDataUrl: dataUrl,
+        title: 'Annotated Screenshot — Research Overview',
+        sourceUrl: 'https://notes.app.euclidprojects.org/',
+        sourceTitle: 'Euclid Smart Notes',
+        notebookId: selectedNotebookId,
+        folderId: selectedFolderId || null,
+        tags: selectedTagNames,
+        annotations: [],
+      });
+
+      if (!res.success || !res.noteId) {
+        alert(res.error || 'Failed to save screenshot to Smart Notes');
+        setIsSaving(false);
+        return;
+      }
+
+      const noteToSave: EuclidNote = {
+        id: res.noteId,
+        user_id: user.uid,
+        title: 'Annotated Screenshot — Research Overview',
+        content: `
+          <div class="prose max-w-none">
+            <h3>Annotated Screenshot</h3>
+            <p class="text-xs text-slate-500">Source: <a href="https://notes.app.euclidprojects.org/" target="_blank">https://notes.app.euclidprojects.org/</a></p>
+            <img src="${res.imageUrl || dataUrl}" class="rounded-xl border shadow-lg my-3 w-full"/>
+            <p class="text-xs text-slate-700">Editable annotation paths saved along with flattened image layer.</p>
+          </div>
+        `,
+        plainTextContent: 'Annotated Screenshot saved to Euclid Smart Notes.',
+        markdownContent: `![Annotated Screenshot](${res.imageUrl || dataUrl})\n\n*Annotated screenshot from webpage*`,
+        notebook_id: selectedNotebookId,
+        folder_id: selectedFolderId || null,
+        tags: selectedTagNames,
+        noteType: 'annotated_screenshot',
+        sourceUrl: 'https://notes.app.euclidprojects.org/',
+        sourceDomain: 'notes.app.euclidprojects.org',
+        extensionCreated: true,
+        syncStatus: 'synced',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      await onSaveNote(noteToSave);
+      setIsSaving(false);
+      setSavedNoteId(res.noteId);
+    } catch (e: any) {
+      console.error('Save error:', e);
+      alert(e?.message || 'Failed to save screenshot.');
+      setIsSaving(false);
+    }
   };
 
   return (

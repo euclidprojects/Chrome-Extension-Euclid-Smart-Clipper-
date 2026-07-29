@@ -52,6 +52,8 @@ import {
   EuclidNote,
   EuclidAnnotation,
 } from '../types';
+import { auth } from '../lib/firebase';
+import { firebaseSyncService, SaveScreenshotParams } from '../services/firebaseService';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
 import {
   AnnotationToolId,
@@ -429,65 +431,109 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
   const handleSaveClip = async () => {
     setIsSaving(true);
     setSaveError(null);
-
-    const steps = [
-      'Exporting annotated image…',
-      'Collecting capture metadata…',
-      'Saving note to Euclid Smart Notes…',
-      'Clip saved successfully!',
-    ];
-
-    for (const step of steps) {
-      setSaveStepMessage(step);
-      await new Promise((r) => setTimeout(r, 220));
-    }
+    setSaveStepMessage('Confirming authentication...');
 
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('You must sign in before saving to Smart Notes.');
+      }
+
+      console.log('[Smart Notes] Save started');
+      console.log(`[Smart Notes] Authenticated user: ${user.uid}`);
+
+      setSaveStepMessage('Preparing screenshot...');
       const canvas = canvasRef.current;
       const annotatedDataUrl = canvas ? canvas.toDataURL('image/png') : job.dataUrl;
-
       const selectedTagNames = tags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name);
-      const newNoteId = 'note_' + Date.now();
 
-      const noteToSave: EuclidNote = {
-        id: newNoteId,
-        user_id: 'local-user',
+      const savePayload: SaveScreenshotParams = {
+        screenshotDataUrl: annotatedDataUrl,
         title: noteTitle || job.sourceTitle || 'Captured Screenshot',
-        content: `
-          <div class="euclid-clip-body">
-            <h3>${noteTitle}</h3>
-            ${userRemark ? `<p class="font-medium text-emerald-900 my-2"><strong>Remark:</strong> ${userRemark}</p>` : ''}
-            <div class="my-3">
-              <img src="${annotatedDataUrl}" alt="${noteTitle}" class="rounded-xl border shadow-lg max-w-full h-auto"/>
-            </div>
-            <p class="text-xs text-slate-500">Source: <a href="${job.sourceUrl}" target="_blank" class="text-emerald-600 underline">${job.sourceTitle}</a></p>
-          </div>
-        `,
-        plainTextContent: (userRemark ? `${userRemark}\n\n` : '') + `Source: ${job.sourceUrl}`,
-        markdownContent: `# ${noteTitle}\n\n${userRemark ? `**Remark:** ${userRemark}\n\n` : ''}![${noteTitle}](${annotatedDataUrl})\n\n*Source: [${job.sourceTitle}](${job.sourceUrl})*`,
-        notebook_id: selectedNotebookId,
-        folder_id: selectedFolderId || null,
-        tags: selectedTagNames,
-        noteType: 'annotated_screenshot',
         sourceUrl: job.sourceUrl,
-        canonicalUrl: job.sourceUrl,
         sourceTitle: job.sourceTitle,
-        sourceDomain: new URL(job.sourceUrl || 'https://notes.app.euclidprojects.org').hostname,
-        clipFormat: 'screenshot',
+        notebookId: selectedNotebookId,
+        folderId: selectedFolderId || null,
+        tags: selectedTagNames,
+        userRemark: userRemark,
         annotations: annotations,
-        extensionCreated: true,
-        extensionVersion: '1.0.0',
-        syncStatus: 'synced',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        capturedAt: new Date(job.createdAt || Date.now()).toISOString(),
       };
 
-      await onSaveNote(noteToSave);
+      setSaveStepMessage('Uploading screenshot & creating note...');
+
+      let response: { success: boolean; noteId?: string; imageUrl?: string; error?: string } | null = null;
+
+      // Send to background service worker if chrome extension messaging is available
+      if (typeof chrome !== 'undefined' && chrome?.runtime?.sendMessage) {
+        try {
+          response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+              {
+                type: 'SAVE_SCREENSHOT_TO_SMART_NOTES',
+                payload: savePayload,
+              },
+              (res) => {
+                if (chrome.runtime.lastError) {
+                  console.warn('[Smart Notes] Extension message fallback:', chrome.runtime.lastError.message);
+                  resolve(null);
+                } else {
+                  resolve(res);
+                }
+              }
+            );
+          });
+        } catch (msgErr) {
+          console.warn('[Smart Notes] Message exception fallback:', msgErr);
+        }
+      }
+
+      // Direct fallback via firebaseSyncService if service worker did not respond
+      if (!response || !response.success) {
+        if (response && response.error && !response.error.includes('message')) {
+          throw new Error(response.error);
+        }
+        response = await firebaseSyncService.saveScreenshotToSmartNotes(savePayload);
+      }
+
+      if (!response.success || !response.noteId) {
+        throw new Error(response.error || 'Failed to save screenshot to Euclid Smart Notes.');
+      }
+
+      setSaveStepMessage('Saved to Smart Notes!');
+      setSavedNoteId(response.noteId);
       setIsSaving(false);
-      setSavedNoteId(newNoteId);
+
+      if (onSaveNote) {
+        try {
+          const localNote: EuclidNote = {
+            id: response.noteId,
+            user_id: user.uid,
+            title: savePayload.title || 'Captured Screenshot',
+            content: userRemark || '',
+            plainTextContent: userRemark || '',
+            markdownContent: userRemark || '',
+            noteType: 'annotated_screenshot',
+            sourceUrl: job.sourceUrl,
+            sourceTitle: job.sourceTitle,
+            clipFormat: 'screenshot',
+            syncStatus: 'synced',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          await onSaveNote(localNote);
+        } catch (e) {
+          console.warn('[Smart Notes] Parent note update callback:', e);
+        }
+      }
     } catch (err: any) {
+      console.error('[Smart Notes] Save failed', {
+        code: err?.code,
+        message: err?.message,
+        stack: err?.stack,
+      });
       setIsSaving(false);
-      setSaveError(err?.message || 'Failed to save clip.');
+      setSaveError(err?.message || 'Failed to save screenshot: Unknown error');
     }
   };
 

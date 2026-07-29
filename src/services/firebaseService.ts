@@ -17,6 +17,8 @@ import {
   getDocs,
   query,
   where,
+  onSnapshot,
+  serverTimestamp,
   ref,
   uploadBytes,
   getDownloadURL,
@@ -31,6 +33,27 @@ import {
   EuclidUser,
   EuclidAttachment,
 } from '../types';
+import { localNoteRepo } from '../storage/indexedDB';
+
+export interface SaveScreenshotParams {
+  screenshotDataUrl: string;
+  title?: string;
+  sourceUrl?: string;
+  sourceTitle?: string;
+  notebookId?: string | null;
+  folderId?: string | null;
+  tags?: string[];
+  userRemark?: string;
+  annotations?: any[];
+  capturedAt?: string;
+}
+
+export interface SaveScreenshotResult {
+  success: boolean;
+  noteId?: string;
+  imageUrl?: string;
+  error?: string;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -69,6 +92,241 @@ export const firebaseAuthService = {
 };
 
 export const firebaseSyncService = {
+  // Required Save to Smart Notes Flow
+  async saveScreenshotToSmartNotes(params: SaveScreenshotParams): Promise<SaveScreenshotResult> {
+    console.log('[Smart Notes] Save started');
+    try {
+      // 1. Confirm that the user is authenticated & obtain current Firebase user's uid
+      let currentUser = auth.currentUser;
+      if (!currentUser) {
+        // Wait briefly for auth initialization if needed
+        currentUser = await new Promise((resolve) => {
+          const unsubscribe = onAuthStateChanged(auth, (u) => {
+            unsubscribe();
+            resolve(u);
+          });
+          setTimeout(() => {
+            unsubscribe();
+            resolve(auth.currentUser);
+          }, 2500);
+        });
+      }
+
+      if (!currentUser) {
+        throw new Error('You must sign in before saving to Smart Notes.');
+      }
+
+      const uid = currentUser.uid;
+      console.log(`[Smart Notes] Authenticated user: ${uid}`);
+
+      // 2. Prepare screenshot - convert screenshot data URL or Blob into a valid image file
+      console.log('[Smart Notes] Preparing screenshot');
+      const dataUrl = params.screenshotDataUrl;
+      if (!dataUrl) {
+        throw new Error('No screenshot image data provided.');
+      }
+
+      let blob: Blob;
+      if (dataUrl.startsWith('data:')) {
+        const arr = dataUrl.split(',');
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        blob = new Blob([u8arr], { type: mime });
+      } else if (dataUrl.startsWith('http') || dataUrl.startsWith('blob:')) {
+        const response = await fetch(dataUrl);
+        blob = await response.blob();
+      } else {
+        throw new Error('Invalid screenshot data format.');
+      }
+
+      // 3. Upload the screenshot to Firebase Storage using required user path
+      console.log('[Smart Notes] Uploading screenshot');
+      const timestamp = Date.now();
+      const fileName = `${timestamp}-screenshot.png`;
+      const storagePath = `users/${uid}/smart-notes/screenshots/${fileName}`;
+      const storageRef = ref(storage, storagePath);
+
+      await uploadBytes(storageRef, blob, { contentType: 'image/png' });
+      console.log('[Smart Notes] Screenshot uploaded');
+
+      // 4. Obtain download URL
+      const downloadURL = await getDownloadURL(storageRef);
+      console.log(`[Smart Notes] Download URL received: ${downloadURL}`);
+
+      // 5. Create a Firestore note document containing the screenshot URL
+      console.log('[Smart Notes] Creating Firestore note');
+      const noteId = `note_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
+      const formattedDate = new Date().toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const title = params.title || `Screenshot ${formattedDate}`;
+      const sourceUrl = params.sourceUrl || '';
+      const sourceTitle = params.sourceTitle || title;
+      const sourceDomain = sourceUrl ? new URL(sourceUrl).hostname : '';
+      const userRemark = params.userRemark || '';
+      const nowIso = new Date().toISOString();
+
+      const htmlContent = `
+        <div class="euclid-clip-body">
+          <h3>${title}</h3>
+          ${userRemark ? `<p class="font-medium text-emerald-900 my-2"><strong>Remark:</strong> ${userRemark}</p>` : ''}
+          <div class="my-3">
+            <img src="${downloadURL}" alt="${title}" class="rounded-xl border shadow-lg max-w-full h-auto"/>
+          </div>
+          ${sourceUrl ? `<p class="text-xs text-slate-500">Source: <a href="${sourceUrl}" target="_blank" class="text-emerald-600 underline">${sourceTitle}</a></p>` : ''}
+        </div>
+      `;
+
+      const plainTextContent = (userRemark ? `${userRemark}\n\n` : '') + (sourceUrl ? `Source: ${sourceUrl}` : '');
+      const markdownContent = `# ${title}\n\n${userRemark ? `**Remark:** ${userRemark}\n\n` : ''}![${title}](${downloadURL})\n\n${sourceUrl ? `*Source: [${sourceTitle}](${sourceUrl})*` : ''}`;
+
+      const noteDocument = {
+        id: noteId,
+        userId: uid,
+        user_id: uid,
+        title: title,
+        content: htmlContent,
+        plainTextContent: plainTextContent,
+        markdownContent: markdownContent,
+        type: 'screenshot',
+        noteType: 'annotated_screenshot',
+        clipFormat: 'screenshot',
+        source: 'euclid-smart-clipper',
+        sourceUrl: sourceUrl,
+        canonicalUrl: sourceUrl,
+        sourceTitle: sourceTitle,
+        sourceDomain: sourceDomain,
+        imageUrl: downloadURL,
+        screenshotUrl: downloadURL,
+        notebook_id: params.notebookId || null,
+        folder_id: params.folderId || null,
+        tags: params.tags || [],
+        annotations: params.annotations || [],
+        attachments: [
+          {
+            id: `att_${timestamp}`,
+            type: 'image',
+            url: downloadURL,
+            downloadURL: downloadURL,
+            name: fileName,
+            filename: fileName,
+            mimeType: 'image/png',
+            storagePath: storagePath,
+          },
+        ],
+        is_pinned: false,
+        is_favorite: false,
+        is_archived: false,
+        is_deleted: false,
+        extensionCreated: true,
+        extensionVersion: '1.0.0',
+        syncStatus: 'synced',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      // Primary top-level Notes write
+      await setDoc(doc(db, 'Notes', noteId), noteDocument, { merge: true });
+
+      // Subcollection users/{uid}/notes write
+      try {
+        await setDoc(doc(db, 'users', uid, 'notes', noteId), noteDocument, { merge: true });
+      } catch (e) {
+        console.warn('[Smart Notes] Subcollection notes write fallback:', e);
+      }
+
+      // Subcollection users/{uid}/clips write
+      try {
+        await setDoc(doc(db, 'users', uid, 'clips', noteId), noteDocument, { merge: true });
+      } catch (e) {
+        console.warn('[Smart Notes] Subcollection clips write fallback:', e);
+      }
+
+      // Update IndexedDB local store
+      try {
+        const localNote: EuclidNote = {
+          ...noteDocument,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        } as any;
+        await localNoteRepo.save(localNote);
+      } catch (e) {
+        console.warn('[Smart Notes] IndexedDB local save fallback:', e);
+      }
+
+      console.log(`[Smart Notes] Note created: ${noteId}`);
+      return {
+        success: true,
+        noteId: noteId,
+        imageUrl: downloadURL,
+      };
+    } catch (error: any) {
+      console.error('[Smart Notes] Save failed', {
+        code: error?.code,
+        message: error?.message,
+        stack: error?.stack,
+      });
+
+      let userFriendlyMessage = error?.message || 'Failed to save screenshot: Unknown error';
+      if (!auth.currentUser || error?.message?.includes('sign in')) {
+        userFriendlyMessage = 'Please sign in before saving to Smart Notes.';
+      } else if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
+        userFriendlyMessage = 'Firestore denied permission to create this note.';
+      } else if (error?.code?.includes('storage/')) {
+        userFriendlyMessage = 'The screenshot could not be uploaded.';
+      }
+
+      return {
+        success: false,
+        error: userFriendlyMessage,
+      };
+    }
+  },
+
+  // Real-time listener for user's Smart Notes
+  subscribeToUserNotes(userId: string, callback: (notes: EuclidNote[]) => void): () => void {
+    const q = query(collection(db, 'Notes'), where('user_id', '==', userId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const notes: EuclidNote[] = [];
+        snapshot.forEach((d) => {
+          notes.push({ id: d.id, ...d.data() } as EuclidNote);
+        });
+        callback(notes);
+      },
+      (err) => {
+        console.warn('[Smart Notes] Snapshot listener warning:', err);
+      }
+    );
+  },
+
+  async fetchUserNotes(userId: string): Promise<EuclidNote[]> {
+    try {
+      const q = query(collection(db, 'Notes'), where('user_id', '==', userId));
+      const snap = await getDocs(q);
+      const list: EuclidNote[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EuclidNote));
+      return list;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'Notes');
+      return [];
+    }
+  },
+
   // Save clip under secure user path: users/{userId}/clips/{clipId}
   async saveNoteToSmartNotes(note: EuclidNote, userId: string): Promise<boolean> {
     try {

@@ -48,7 +48,7 @@ export default defineConfig(({ command }) => {
         },
       },
       build: {
-        outDir: 'extension-dist',
+        outDir: 'dist',
         emptyOutDir: true,
         rollupOptions: {
           input: {

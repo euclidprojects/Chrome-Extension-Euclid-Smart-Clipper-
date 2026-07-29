@@ -3,8 +3,8 @@ import path from 'path';
 import https from 'https';
 import sharp from 'sharp';
 
-const publicIconsDir = path.join(process.cwd(), 'public', 'icons');
-const distIconsDir = path.join(process.cwd(), 'dist', 'icons');
+const publicIconsDir = path.join(process.cwd(), 'public-extension', 'icons');
+const distIconsDir = path.join(process.cwd(), 'extension-dist', 'icons');
 
 if (!fs.existsSync(publicIconsDir)) fs.mkdirSync(publicIconsDir, { recursive: true });
 if (!fs.existsSync(distIconsDir)) fs.mkdirSync(distIconsDir, { recursive: true });

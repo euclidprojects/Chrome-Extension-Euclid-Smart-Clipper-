@@ -11,7 +11,9 @@ const popupAppPath = path.resolve(process.cwd(), 'src/popup/PopupApp.tsx');
 const popupCssPath = path.resolve(process.cwd(), 'src/popup/popup.css');
 const errorBoundaryPath = path.resolve(process.cwd(), 'src/components/ErrorBoundary.tsx');
 const clippingWorkspacePath = path.resolve(process.cwd(), 'src/components/ClippingWorkspace.tsx');
-const manifestPath = path.resolve(process.cwd(), 'manifest.json');
+const manifestPath = fs.existsSync(path.resolve(process.cwd(), 'public-extension/manifest.json'))
+  ? path.resolve(process.cwd(), 'public-extension/manifest.json')
+  : path.resolve(process.cwd(), 'manifest.json');
 
 // 1. Verify Entry Files
 if (!fs.existsSync(popupHtmlPath)) {

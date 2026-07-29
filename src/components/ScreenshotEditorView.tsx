@@ -429,9 +429,11 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
 
   // Primary Save Action Handler
   const handleSaveClip = async () => {
+    if (isSaving) return;
+
     setIsSaving(true);
     setSaveError(null);
-    setSaveStepMessage('Confirming authentication...');
+    setSaveStepMessage('Uploading screenshot…');
 
     try {
       if (auth?.authStateReady) {
@@ -445,7 +447,6 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
       console.log('[Smart Notes] Save started');
       console.log(`[Smart Notes] Authenticated user: ${user.uid}`);
 
-      setSaveStepMessage('Preparing screenshot...');
       const canvas = canvasRef.current;
       const annotatedDataUrl = canvas ? canvas.toDataURL('image/png') : job.dataUrl;
       const selectedTagNames = tags.filter((t) => selectedTagIds.includes(t.id)).map((t) => t.name);
@@ -463,49 +464,15 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
         capturedAt: new Date(job.createdAt || Date.now()).toISOString(),
       };
 
-      setSaveStepMessage('Uploading screenshot & creating note...');
-
-      let response: { success: boolean; noteId?: string; imageUrl?: string; error?: string } | null = null;
-
-      // Send to background service worker if chrome extension messaging is available
-      if (typeof chrome !== 'undefined' && chrome?.runtime?.sendMessage) {
-        try {
-          response = await new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-              {
-                type: 'SAVE_SCREENSHOT_TO_SMART_NOTES',
-                payload: savePayload,
-              },
-              (res) => {
-                if (chrome.runtime.lastError) {
-                  console.warn('[Smart Notes] Extension message fallback:', chrome.runtime.lastError.message);
-                  resolve(null);
-                } else {
-                  resolve(res);
-                }
-              }
-            );
-          });
-        } catch (msgErr) {
-          console.warn('[Smart Notes] Message exception fallback:', msgErr);
-        }
-      }
-
-      // Direct fallback via firebaseSyncService if service worker did not respond
-      if (!response || !response.success) {
-        if (response && response.error && !response.error.includes('message')) {
-          throw new Error(response.error);
-        }
-        response = await firebaseSyncService.saveScreenshotToSmartNotes(savePayload);
-      }
+      const response = await firebaseSyncService.saveScreenshotToSmartNotes(savePayload);
 
       if (!response.success || !response.noteId) {
         throw new Error(response.error || 'Failed to save screenshot to Euclid Smart Notes.');
       }
 
-      setSaveStepMessage('Saved to Smart Notes!');
+      console.log('[Smart Notes] Save completed:', response);
+      setSaveStepMessage('Saved to Smart Notes');
       setSavedNoteId(response.noteId);
-      setIsSaving(false);
 
       if (onSaveNote) {
         try {
@@ -530,13 +497,27 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
         }
       }
     } catch (err: any) {
-      console.error('[Smart Notes] Save failed', {
+      console.error('[Smart Notes] Screenshot save failed:', {
         code: err?.code,
         message: err?.message,
         stack: err?.stack,
       });
+
+      if (err?.code === 'permission-denied') {
+        setSaveStepMessage('Permission denied');
+        setSaveError('Firebase denied permission to save this note.');
+      } else if (
+        err instanceof ReferenceError &&
+        err.message.includes('XMLHttpRequest')
+      ) {
+        setSaveStepMessage('Firebase context error');
+        setSaveError('Firebase is running in an unsupported extension context.');
+      } else {
+        setSaveStepMessage('Save failed');
+        setSaveError(err?.message || 'The screenshot could not be saved.');
+      }
+    } finally {
       setIsSaving(false);
-      setSaveError(err?.message || 'Failed to save screenshot: Unknown error');
     }
   };
 

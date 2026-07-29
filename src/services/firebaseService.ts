@@ -14,6 +14,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  addDoc,
   collection,
   getDocs,
   query,
@@ -95,7 +96,12 @@ export const firebaseAuthService = {
 export const firebaseSyncService = {
   // Required Save to Smart Notes Flow
   async saveScreenshotToSmartNotes(params: SaveScreenshotParams): Promise<SaveScreenshotResult> {
-    console.log('[Smart Notes] Starting Firestore save');
+    const execContext = typeof window !== 'undefined'
+      ? (window.location.href.includes('screenshot-editor') ? 'editor' : 'side panel')
+      : 'service worker';
+
+    console.log(`[Firebase Debug] Execution context: ${execContext}`);
+
     try {
       if (auth?.authStateReady) {
         await auth.authStateReady();
@@ -104,7 +110,6 @@ export const firebaseSyncService = {
       // 1. Confirm that the user is authenticated & obtain current Firebase user's uid
       let currentUser = auth?.currentUser;
       if (!currentUser) {
-        // Wait briefly for auth initialization if needed
         currentUser = await new Promise((resolve) => {
           const unsubscribe = onAuthStateChanged(auth, (u) => {
             unsubscribe();
@@ -122,22 +127,21 @@ export const firebaseSyncService = {
       }
 
       const uid = currentUser.uid;
-      const timestamp = Date.now();
-      const noteId = `note_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
 
-      console.log('[Firebase Debug] Project:', firebaseConfig.projectId);
-      console.log('[Firebase Debug] User:', uid);
-      console.log('[Firebase Debug] Firestore save started');
-      console.log('[Firebase Debug] Firestore document path:', `Notes/${noteId}`);
+      console.log(`[Firebase Debug] Auth UID: ${uid}`);
+      console.log(`[Firebase Debug] Firebase project ID: ${firebaseConfig.projectId}`);
+      console.log('[Firebase Debug] Notes collection: Notes');
+      console.log('[Firebase Debug] Notes ownership field: user_id');
+      console.log('[Firebase Debug] Notebooks collection: notebooks');
+      console.log('[Firebase Debug] Notebook ownership field: userId');
 
-      // 2. Prepare screenshot - convert screenshot data URL or Blob into a valid image file
-      console.log('[Smart Notes] Preparing screenshot');
+      // 2. Prepare screenshot Blob
       const dataUrl = params.screenshotDataUrl;
       if (!dataUrl) {
         throw new Error('No screenshot image data provided.');
       }
 
-      let blob: Blob;
+      let screenshotBlob: Blob;
       if (dataUrl.startsWith('data:')) {
         const arr = dataUrl.split(',');
         const mimeMatch = arr[0].match(/:(.*?);/);
@@ -148,127 +152,105 @@ export const firebaseSyncService = {
         while (n--) {
           u8arr[n] = bstr.charCodeAt(n);
         }
-        blob = new Blob([u8arr], { type: mime });
+        screenshotBlob = new Blob([u8arr], { type: mime });
       } else if (dataUrl.startsWith('http') || dataUrl.startsWith('blob:')) {
         const response = await fetch(dataUrl);
-        blob = await response.blob();
+        screenshotBlob = await response.blob();
       } else {
         throw new Error('Invalid screenshot data format.');
       }
 
-      // 3. Upload the screenshot to Firebase Storage using required user path
-      console.log('[Smart Notes] Uploading screenshot');
-      const fileName = `${timestamp}-screenshot.png`;
+      // 3. Upload screenshot to Firebase Storage
+      console.log('[Firebase Debug] Screenshot upload started');
+      const fileName = `${Date.now()}-screenshot.png`;
       const storagePath = `users/${uid}/smart-notes/screenshots/${fileName}`;
-      const storageRef = ref(storage, storagePath);
+      const screenshotRef = ref(storage, storagePath);
 
-      await uploadBytes(storageRef, blob, { contentType: 'image/png' });
-      console.log('[Smart Notes] Screenshot uploaded');
+      const uploadResult = await uploadBytes(screenshotRef, screenshotBlob, {
+        contentType: 'image/png',
+        customMetadata: {
+          userId: uid,
+          source: 'euclid-smart-clipper',
+        },
+      });
+      console.log('[Firebase Debug] Screenshot upload completed');
 
       // 4. Obtain download URL
-      const downloadURL = await getDownloadURL(storageRef);
-      console.log(`[Smart Notes] Download URL received: ${downloadURL}`);
+      const screenshotUrl = await getDownloadURL(uploadResult.ref);
+      console.log('[Firebase Debug] Download URL received:', screenshotUrl);
 
-      // 5. Create a Firestore note document containing the screenshot URL
-      console.log('[Smart Notes] Creating Firestore note');
-      const formattedDate = new Date().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      // 5. Create Firestore note
+      console.log('[Firebase Debug] Firestore note creation started');
 
-      const title = params.title || `Screenshot ${formattedDate}`;
+      const title = params.title || 'Screenshot';
       const sourceUrl = params.sourceUrl || '';
       const sourceTitle = params.sourceTitle || title;
-      const sourceDomain = sourceUrl ? new URL(sourceUrl).hostname : '';
       const userRemark = params.userRemark || '';
       const nowIso = new Date().toISOString();
 
-      const htmlContent = `
-        <div class="euclid-clip-body">
-          <h3>${title}</h3>
-          ${userRemark ? `<p class="font-medium text-emerald-900 my-2"><strong>Remark:</strong> ${userRemark}</p>` : ''}
-          <div class="my-3">
-            <img src="${downloadURL}" alt="${title}" class="rounded-xl border shadow-lg max-w-full h-auto"/>
-          </div>
-          ${sourceUrl ? `<p class="text-xs text-slate-500">Source: <a href="${sourceUrl}" target="_blank" class="text-emerald-600 underline">${sourceTitle}</a></p>` : ''}
-        </div>
-      `;
-
-      const plainTextContent = (userRemark ? `${userRemark}\n\n` : '') + (sourceUrl ? `Source: ${sourceUrl}` : '');
-      const markdownContent = `# ${title}\n\n${userRemark ? `**Remark:** ${userRemark}\n\n` : ''}![${title}](${downloadURL})\n\n${sourceUrl ? `*Source: [${sourceTitle}](${sourceUrl})*` : ''}`;
-
-      const noteDocument = {
-        id: noteId,
-        userId: uid,
+      const noteData: Record<string, any> = {
         user_id: uid,
-        title: title,
-        content: htmlContent,
-        plainTextContent: plainTextContent,
-        markdownContent: markdownContent,
+        userId: uid,
+        title,
+        content: userRemark,
+        plainTextContent: userRemark,
+        markdownContent: userRemark,
         type: 'screenshot',
         noteType: 'annotated_screenshot',
         clipFormat: 'screenshot',
         source: 'euclid-smart-clipper',
-        sourceUrl: sourceUrl,
-        canonicalUrl: sourceUrl,
-        sourceTitle: sourceTitle,
-        sourceDomain: sourceDomain,
-        imageUrl: downloadURL,
-        screenshotUrl: downloadURL,
+        sourceUrl,
+        sourceTitle,
+        screenshotUrl,
+        imageUrl: screenshotUrl,
         notebook_id: params.notebookId || null,
         folder_id: params.folderId || null,
         tags: params.tags || [],
         annotations: params.annotations || [],
         attachments: [
           {
-            id: `att_${timestamp}`,
             type: 'image',
-            url: downloadURL,
-            downloadURL: downloadURL,
+            url: screenshotUrl,
+            downloadURL: screenshotUrl,
             name: fileName,
             filename: fileName,
-            mimeType: 'image/png',
-            storagePath: storagePath,
+            storagePath,
           },
         ],
         is_pinned: false,
         is_favorite: false,
         is_archived: false,
         is_deleted: false,
-        extensionCreated: true,
-        extensionVersion: '1.0.0',
-        syncStatus: 'synced',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         created_at: nowIso,
         updated_at: nowIso,
       };
 
-      // Primary top-level Notes write
-      await setDoc(doc(db, 'Notes', noteId), noteDocument, { merge: true });
-      console.log(`[Smart Notes] Firestore note created: ${noteId}`);
+      console.log('[Smart Notes] Creating note:', {
+        collection: 'Notes',
+        uid,
+        notebookId: params.notebookId,
+        storagePath,
+      });
 
-      // Subcollection users/{uid}/notes write
-      try {
-        await setDoc(doc(db, 'users', uid, 'notes', noteId), noteDocument, { merge: true });
-      } catch (e) {
-        console.warn('[Smart Notes] Subcollection notes write fallback:', e);
-      }
+      const noteRef = await addDoc(collection(db, 'Notes'), noteData);
+      const noteId = noteRef.id;
 
-      // Subcollection users/{uid}/clips write
+      console.log('[Firebase Debug] Firestore note created:', noteId);
+
+      // Also set doc ID inside document for convenience
       try {
-        await setDoc(doc(db, 'users', uid, 'clips', noteId), noteDocument, { merge: true });
+        await setDoc(doc(db, 'Notes', noteId), { id: noteId }, { merge: true });
       } catch (e) {
-        console.warn('[Smart Notes] Subcollection clips write fallback:', e);
+        console.warn('[Smart Notes] Set note ID merge warning:', e);
       }
 
       // Update IndexedDB local store
       try {
         const localNote: EuclidNote = {
-          ...noteDocument,
+          ...noteData,
+          id: noteId,
           createdAt: nowIso,
           updatedAt: nowIso,
         } as any;
@@ -277,11 +259,11 @@ export const firebaseSyncService = {
         console.warn('[Smart Notes] IndexedDB local save fallback:', e);
       }
 
-      console.log('[Smart Notes] Save completed successfully');
+      console.log('[Firebase Debug] Save process completed');
       return {
         success: true,
-        noteId: noteId,
-        imageUrl: downloadURL,
+        noteId,
+        imageUrl: screenshotUrl,
       };
     } catch (error: any) {
       console.error('[Smart Notes] Save failed', {
@@ -294,7 +276,7 @@ export const firebaseSyncService = {
       if (!auth?.currentUser || error?.message?.includes('sign in')) {
         userFriendlyMessage = 'Please sign in before saving to Smart Notes.';
       } else if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
-        userFriendlyMessage = 'Firestore denied permission to create this note.';
+        userFriendlyMessage = 'Firebase denied permission to save this note.';
       } else if (error?.code?.includes('storage/')) {
         userFriendlyMessage = 'The screenshot could not be uploaded.';
       }
@@ -312,9 +294,14 @@ export const firebaseSyncService = {
     callback: (notes: EuclidNote[]) => void,
     onError?: (error: any) => void
   ): () => void {
-    console.log('[Smart Notes] Listener path: Notes');
-    console.log('[Smart Notes] Listener UID:', userId);
-    console.log('[Smart Notes] Query ownership field: user_id');
+    console.log('[Firebase Debug] Execution context: side panel');
+    console.log(`[Firebase Debug] Auth UID: ${userId}`);
+    console.log(`[Firebase Debug] Firebase project ID: ${firebaseConfig.projectId}`);
+    console.log('[Firebase Debug] Notes collection: Notes');
+    console.log('[Firebase Debug] Notes ownership field: user_id');
+    console.log('[Smart Notes] Notes collection: Notes');
+    console.log('[Smart Notes] Notes ownership field: user_id');
+    console.log('[Smart Notes] Notes UID:', userId);
 
     const q = query(collection(db, 'Notes'), where('user_id', '==', userId));
     return onSnapshot(
@@ -343,9 +330,14 @@ export const firebaseSyncService = {
     callback: (notebooks: EuclidNotebook[]) => void,
     onError?: (error: any) => void
   ): () => void {
-    console.log('[Smart Notes] Listener path: notebooks');
-    console.log('[Smart Notes] Listener UID:', userId);
-    console.log('[Smart Notes] Query ownership field: userId');
+    console.log('[Firebase Debug] Execution context: side panel');
+    console.log(`[Firebase Debug] Auth UID: ${userId}`);
+    console.log(`[Firebase Debug] Firebase project ID: ${firebaseConfig.projectId}`);
+    console.log('[Firebase Debug] Notebooks collection: notebooks');
+    console.log('[Firebase Debug] Notebook ownership field: userId');
+    console.log('[Smart Notes] Notebooks collection: notebooks');
+    console.log('[Smart Notes] Notebook ownership field: userId');
+    console.log('[Smart Notes] Notebook UID:', userId);
 
     const q = query(collection(db, 'notebooks'), where('userId', '==', userId));
     return onSnapshot(

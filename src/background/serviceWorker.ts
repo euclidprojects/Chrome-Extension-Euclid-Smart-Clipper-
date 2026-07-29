@@ -2,9 +2,8 @@
 // Background Service Worker for Euclid Smart Clipper
 
 import { isSupportedPage } from '../utils/pageUtils';
-import { auth } from '../lib/firebase';
+import { auth } from '../lib/firebaseWorker';
 import { OAuthCredential, signInWithCredential } from 'firebase/auth';
-import { firebaseSyncService } from '../services/firebaseService';
 import { getCurrentExtensionOrigin, checkExtensionIdMatch } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
@@ -511,35 +510,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SAVE_SCREENSHOT_TO_SMART_NOTES' || message.type === 'save_screenshot_to_smart_notes') {
-    console.info('[Background] SAVE_SCREENSHOT_TO_SMART_NOTES request received');
-    const payload = message.payload || message.data || {};
-
-    firebaseSyncService
-      .saveScreenshotToSmartNotes({
-        screenshotDataUrl: payload.screenshotDataUrl || payload.dataUrl,
-        title: payload.title,
-        sourceUrl: payload.sourceUrl,
-        sourceTitle: payload.sourceTitle,
-        notebookId: payload.notebookId,
-        folderId: payload.folderId,
-        tags: payload.tags,
-        userRemark: payload.userRemark,
-        annotations: payload.annotations,
-        capturedAt: payload.capturedAt || new Date().toISOString(),
-      })
-      .then((result) => {
-        console.info('[Background] SAVE_SCREENSHOT_TO_SMART_NOTES result:', result);
-        sendResponse(result);
-      })
-      .catch((error) => {
-        console.error('[Background] SAVE_SCREENSHOT_TO_SMART_NOTES error:', error);
-        sendResponse({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-    return true; // Keep asynchronous message channel open
+    console.info('[Background] SAVE_SCREENSHOT_TO_SMART_NOTES request received - screenshot save handled in editor page');
+    sendResponse({
+      success: false,
+      error: 'Screenshot save must be performed directly in the extension page (editor / side panel).'
+    });
+    return true;
   }
 
   return false;

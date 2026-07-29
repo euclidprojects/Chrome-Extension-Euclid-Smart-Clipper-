@@ -92,4 +92,53 @@ if (errorCount > 0) {
   process.exit(1);
 }
 
-console.log('\n🎉 Extension Build Verification PASSED! Complete unpacked Chrome extension ready in dist/\n');
+// Additional Website & Extension Output Separation Checks
+const websiteDist = path.resolve(process.cwd(), 'website-dist');
+const extensionDist = path.resolve(process.cwd(), 'extension-dist');
+
+if (!fs.existsSync(websiteDist)) {
+  console.error('❌ ERROR: website-dist directory does not exist!');
+  process.exit(1);
+}
+
+if (!fs.existsSync(path.join(websiteDist, 'extension-auth/index.html'))) {
+  console.error('❌ ERROR: website-dist/extension-auth/index.html does not exist!');
+  process.exit(1);
+}
+
+if (!fs.existsSync(path.join(websiteDist, '_headers'))) {
+  console.error('❌ ERROR: website-dist/_headers does not exist!');
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(websiteDist, 'headers'))) {
+  console.error('❌ ERROR: website-dist/headers (without underscore) must not exist!');
+  process.exit(1);
+}
+
+console.log('  ✓ Verified website-dist contains extension-auth/index.html & _headers (and no unneeded headers file).');
+
+if (!fs.existsSync(extensionDist)) {
+  console.error('❌ ERROR: extension-dist directory does not exist!');
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(extensionDist, '_headers')) || fs.existsSync(path.join(distDir, '_headers'))) {
+  console.error('❌ ERROR: Chrome extension package must NOT contain _headers!');
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(extensionDist, 'headers')) || fs.existsSync(path.join(distDir, 'headers'))) {
+  console.error('❌ ERROR: Chrome extension package must NOT contain headers!');
+  process.exit(1);
+}
+
+if (fs.existsSync(path.join(extensionDist, '_redirects')) || fs.existsSync(path.join(distDir, '_redirects'))) {
+  console.error('❌ ERROR: Chrome extension package must NOT contain _redirects!');
+  process.exit(1);
+}
+
+console.log('  ✓ Verified extension-dist (and dist/) contain manifest.json, service-worker.js, offscreen.html & NO _headers.');
+
+console.log('\n🎉 Extension & Website Build Verification PASSED! Complete unpacked Chrome extension ready in extension-dist/ (and dist/), Website output ready in website-dist/\n');
+

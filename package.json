@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "clean": "node -e \"import('fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
-    "build": "npm run clean && node generate-pngs.js && vite build && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-screenshot-editor-fix.mjs && node scripts/verify-extension-build.mjs",
+    "clean": "node -e \"import('fs').then(fs => { fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('website-dist', { recursive: true, force: true }); fs.rmSync('extension-dist', { recursive: true, force: true }); })\"",
+    "build": "npm run clean && node generate-pngs.js && vite build && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/package-outputs.mjs && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-screenshot-editor-fix.mjs && node scripts/verify-extension-build.mjs",
     "test": "node scripts/verify-ui-requirements.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit"

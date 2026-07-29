@@ -20,6 +20,7 @@ export default defineConfig(() => {
           sidepanel: path.resolve(__dirname, 'sidepanel.html'),
           screenshot_editor: path.resolve(__dirname, 'screenshot-editor.html'),
           offscreen: path.resolve(__dirname, 'offscreen.html'),
+          extensionAuth: path.resolve(__dirname, 'extension-auth/index.html'),
           serviceWorker: path.resolve(__dirname, 'src/service-worker.ts'),
         },
         output: {

@@ -5,9 +5,11 @@ const AUTH_PAGE_ORIGIN = "https://euclidprojects.org";
 
 let hostedPageReady = false;
 let resolveHostedPageReady: (() => void) | null = null;
+let rejectHostedPageReady: ((err: Error) => void) | null = null;
 
-const hostedPageReadyPromise = new Promise<void>((resolve) => {
+const hostedPageReadyPromise = new Promise<void>((resolve, reject) => {
   resolveHostedPageReady = resolve;
+  rejectHostedPageReady = reject;
 });
 
 let authIframe: HTMLIFrameElement | null = null;
@@ -66,6 +68,15 @@ globalThis.addEventListener("message", (event) => {
         resolveHostedPageReady?.();
         console.log("[Offscreen] Hosted authentication page ready");
       }
+    } else if (payload?.type === "EUCLID_HOSTED_AUTH_INIT_ERROR") {
+      const err = new Error(
+        payload?.error?.message ||
+          "The hosted authentication page failed to initialize."
+      );
+      (err as any).code =
+        payload?.error?.code || "auth/hosted-initialization-failed";
+      console.error("[Offscreen] Hosted authentication page init error:", err);
+      rejectHostedPageReady?.(err);
     }
   }
 });

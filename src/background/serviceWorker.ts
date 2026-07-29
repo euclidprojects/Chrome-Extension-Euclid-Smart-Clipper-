@@ -4,7 +4,7 @@
 import { isSupportedPage } from '../utils/pageUtils';
 import { auth } from '../lib/firebase';
 import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-extension';
-import { getCurrentExtensionOrigin } from '../utils/extensionUtils';
+import { getCurrentExtensionOrigin, checkExtensionIdMatch } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
 console.info("[Background] Service worker loaded", {
@@ -12,12 +12,8 @@ console.info("[Background] Service worker loaded", {
   timestamp: new Date().toISOString()
 });
 
-console.info("[Service Worker] Euclid Smart Clipper worker loaded", {
-  extensionId: typeof chrome !== 'undefined' && chrome?.runtime ? chrome.runtime.id : '',
-  time: new Date().toISOString()
-});
-
 if (typeof chrome !== 'undefined' && chrome?.runtime?.id) {
+  checkExtensionIdMatch();
   console.info(
     "Confirm this origin is registered in Firebase Authorized Domains:",
     getCurrentExtensionOrigin()

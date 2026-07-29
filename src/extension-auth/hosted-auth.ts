@@ -49,6 +49,9 @@ try {
 
 globalThis.addEventListener("message", async (event) => {
   if (event.origin !== ALLOWED_EXTENSION_ORIGIN) {
+    console.warn("[Hosted Auth] Ignored origin", {
+      origin: event.origin
+    });
     return;
   }
 

@@ -17,8 +17,36 @@ if (!fs.existsSync(authHtmlPath)) {
 }
 
 const authHtmlContent = fs.readFileSync(authHtmlPath, 'utf-8');
-if (!authHtmlContent.includes('assets/')) {
-  console.error('❌ Website build failed: website-dist/extension-auth/index.html does not reference bundled JS assets.');
+
+// Match asset src in html (e.g. /assets/extensionAuth-xxx.js or ../assets/xxx.js)
+const assetMatch = authHtmlContent.match(/src="([^"]+)"/);
+if (!assetMatch) {
+  console.error('❌ Website build failed: website-dist/extension-auth/index.html does not contain a script src attribute.');
+  process.exit(1);
+}
+
+const scriptRelPath = assetMatch[1].replace(/^\//, ''); // remove leading slash
+const scriptFullPath = path.resolve(websiteDistDir, scriptRelPath);
+
+if (!fs.existsSync(scriptFullPath)) {
+  console.error(`❌ Website build failed: Referenced script ${scriptRelPath} does not exist in website-dist.`);
+  process.exit(1);
+}
+
+const scriptContent = fs.readFileSync(scriptFullPath, 'utf-8');
+
+if (!scriptContent.includes('[Hosted Auth] Script started')) {
+  console.error('❌ Website build failed: Hosted auth script does not contain "[Hosted Auth] Script started".');
+  process.exit(1);
+}
+
+if (!scriptContent.includes('EUCLID_HOSTED_AUTH_READY')) {
+  console.error('❌ Website build failed: Hosted auth script does not contain "EUCLID_HOSTED_AUTH_READY".');
+  process.exit(1);
+}
+
+if (scriptContent.match(/from\s+["']firebase\//)) {
+  console.error('❌ Website build failed: Hosted auth script contains unresolved bare Firebase imports.');
   process.exit(1);
 }
 
@@ -41,6 +69,7 @@ if (fs.existsSync(invalidHeadersPath)) {
 }
 
 console.log('  ✓ website-dist/extension-auth/index.html verified.');
+console.log(`  ✓ website-dist/${scriptRelPath} verified (bundled JS asset).`);
 console.log('  ✓ website-dist/_headers verified.');
 console.log('  ✓ No unneeded headers file in website-dist/.');
 console.log('\n🎉 Website Build Verification PASSED! Website deployment package ready in website-dist/\n');

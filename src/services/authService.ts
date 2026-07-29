@@ -154,7 +154,7 @@ class AuthService {
             errorCode: null,
           });
         } catch (e: any) {
-          console.error("[Auth Debug] Firebase failure", {
+          console.warn("[Auth Debug] Profile fallback notice", {
             code: e?.code,
             message: e?.message,
             name: e?.name,
@@ -209,7 +209,7 @@ class AuthService {
       auth,
       handleAuthState,
       (error: any) => {
-        console.error("[Auth Debug] Firebase failure", {
+        console.warn("[Auth Debug] Auth state change listener update", {
           code: error?.code,
           message: error?.message,
           name: error?.name,

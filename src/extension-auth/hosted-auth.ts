@@ -9,20 +9,15 @@ import { firebaseConfig } from "../lib/firebase";
 const ALLOWED_EXTENSION_ORIGIN =
   "chrome-extension://adgadgaalgjmkikplcdlnejpimmebgmm";
 
-function sendToExtension(payload: any) {
-  if (typeof window !== "undefined" && window.parent && window.parent !== window.self) {
-    window.parent.postMessage(payload, ALLOWED_EXTENSION_ORIGIN);
-  }
-}
-
 console.log("[Hosted Auth] Script started");
 
 let auth: ReturnType<typeof getAuth>;
 let googleProvider: GoogleAuthProvider;
 
 try {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
+  const firebaseApp = initializeApp(firebaseConfig);
+
+  auth = getAuth(firebaseApp);
   googleProvider = new GoogleAuthProvider();
 
   googleProvider.setCustomParameters({
@@ -36,22 +31,26 @@ try {
     message: error?.message
   });
 
-  sendToExtension({
-    type: "EUCLID_HOSTED_AUTH_INIT_ERROR",
-    error: {
-      code: error?.code || "auth/hosted-initialization-failed",
-      message: error?.message || "The hosted authentication page failed to initialize."
-    }
-  });
+  globalThis.parent.postMessage(
+    {
+      type: "EUCLID_HOSTED_AUTH_INIT_ERROR",
+      error: {
+        code:
+          error?.code ||
+          "auth/hosted-initialization-failed",
+        message:
+          error?.message ||
+          "Hosted authentication failed to initialize."
+      }
+    },
+    ALLOWED_EXTENSION_ORIGIN
+  );
 
   throw error;
 }
 
 globalThis.addEventListener("message", async (event) => {
   if (event.origin !== ALLOWED_EXTENSION_ORIGIN) {
-    console.warn("[Hosted Auth] Ignored origin", {
-      origin: event.origin
-    });
     return;
   }
 
@@ -81,40 +80,54 @@ globalThis.addEventListener("message", async (event) => {
       googleProvider
     );
 
-    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const credential =
+      GoogleAuthProvider.credentialFromResult(result);
 
     if (!credential) {
       throw new Error(
-        "Google sign-in returned no OAuth credential."
+        "Google authentication returned no OAuth credential."
       );
     }
 
-    sendToExtension({
-      type: "EUCLID_GOOGLE_AUTH_RESULT",
-      requestId,
-      success: true,
-      credential: credential.toJSON()
-    });
+    globalThis.parent.postMessage(
+      {
+        type: "EUCLID_GOOGLE_AUTH_RESULT",
+        requestId,
+        success: true,
+        credential: credential.toJSON()
+      },
+      ALLOWED_EXTENSION_ORIGIN
+    );
   } catch (error: any) {
     console.error("[Hosted Auth] Authentication failed", {
       code: error?.code,
       message: error?.message
     });
 
-    sendToExtension({
-      type: "EUCLID_GOOGLE_AUTH_RESULT",
-      requestId,
-      success: false,
-      error: {
-        code: error?.code || "auth/hosted-auth-failed",
-        message: error?.message || "Google authentication failed."
-      }
-    });
+    globalThis.parent.postMessage(
+      {
+        type: "EUCLID_GOOGLE_AUTH_RESULT",
+        requestId,
+        success: false,
+        error: {
+          code:
+            error?.code ||
+            "auth/google-authentication-failed",
+          message:
+            error?.message ||
+            "Google authentication failed."
+        }
+      },
+      ALLOWED_EXTENSION_ORIGIN
+    );
   }
 });
 
-sendToExtension({
-  type: "EUCLID_HOSTED_AUTH_READY"
-});
+globalThis.parent.postMessage(
+  {
+    type: "EUCLID_HOSTED_AUTH_READY"
+  },
+  ALLOWED_EXTENSION_ORIGIN
+);
 
 console.log("[Hosted Auth] Ready message sent");

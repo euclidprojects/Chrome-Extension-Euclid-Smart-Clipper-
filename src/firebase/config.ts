@@ -9,7 +9,7 @@ import {
   updateProfile,
   User as FirebaseUser,
   GoogleAuthProvider,
-} from 'firebase/auth/web-extension';
+} from 'firebase/auth';
 import { doc, setDoc, getDoc, collection, getDocs, query, where, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 

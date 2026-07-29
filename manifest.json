@@ -35,7 +35,23 @@
     "scripting",
     "downloads",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "identity"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src 'self' https://euclidprojects.org https://*.euclidprojects.org https://euclid-projects.firebaseapp.com https://euclid-projects.web.app; connect-src 'self' https://firestore.googleapis.com https://firebasestorage.googleapis.com https://storage.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://firebaseinstallations.googleapis.com https://www.googleapis.com https://apis.google.com https://www.gstatic.com https://euclid-projects.firebaseapp.com https://euclid-projects.web.app https://*.firebaseapp.com https://*.firebaseio.com https://*.euclidprojects.org https://euclidprojects.org;"
+  },
+
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtu.be/*",
+    "https://music.youtube.com/*",
+    "https://*.firebaseapp.com/*",
+    "https://*.firebaseio.com/*",
+    "https://*.googleapis.com/*",
+    "https://*.euclidprojects.org/*",
+    "https://euclidprojects.org/*"
   ],
 
   "background": {

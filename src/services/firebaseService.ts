@@ -3,6 +3,7 @@ import {
   db,
   storage,
   googleProvider,
+  firebaseConfig,
   fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -94,10 +95,14 @@ export const firebaseAuthService = {
 export const firebaseSyncService = {
   // Required Save to Smart Notes Flow
   async saveScreenshotToSmartNotes(params: SaveScreenshotParams): Promise<SaveScreenshotResult> {
-    console.log('[Smart Notes] Save started');
+    console.log('[Smart Notes] Starting Firestore save');
     try {
+      if (auth?.authStateReady) {
+        await auth.authStateReady();
+      }
+
       // 1. Confirm that the user is authenticated & obtain current Firebase user's uid
-      let currentUser = auth.currentUser;
+      let currentUser = auth?.currentUser;
       if (!currentUser) {
         // Wait briefly for auth initialization if needed
         currentUser = await new Promise((resolve) => {
@@ -107,17 +112,23 @@ export const firebaseSyncService = {
           });
           setTimeout(() => {
             unsubscribe();
-            resolve(auth.currentUser);
+            resolve(auth?.currentUser);
           }, 2500);
         });
       }
 
       if (!currentUser) {
-        throw new Error('You must sign in before saving to Smart Notes.');
+        throw new Error('Please sign in before saving to Smart Notes.');
       }
 
       const uid = currentUser.uid;
-      console.log(`[Smart Notes] Authenticated user: ${uid}`);
+      const timestamp = Date.now();
+      const noteId = `note_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
+
+      console.log('[Firebase Debug] Project:', firebaseConfig.projectId);
+      console.log('[Firebase Debug] User:', uid);
+      console.log('[Firebase Debug] Firestore save started');
+      console.log('[Firebase Debug] Firestore document path:', `Notes/${noteId}`);
 
       // 2. Prepare screenshot - convert screenshot data URL or Blob into a valid image file
       console.log('[Smart Notes] Preparing screenshot');
@@ -147,7 +158,6 @@ export const firebaseSyncService = {
 
       // 3. Upload the screenshot to Firebase Storage using required user path
       console.log('[Smart Notes] Uploading screenshot');
-      const timestamp = Date.now();
       const fileName = `${timestamp}-screenshot.png`;
       const storagePath = `users/${uid}/smart-notes/screenshots/${fileName}`;
       const storageRef = ref(storage, storagePath);
@@ -161,7 +171,6 @@ export const firebaseSyncService = {
 
       // 5. Create a Firestore note document containing the screenshot URL
       console.log('[Smart Notes] Creating Firestore note');
-      const noteId = `note_${timestamp}_${Math.random().toString(36).substring(2, 7)}`;
       const formattedDate = new Date().toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -240,6 +249,7 @@ export const firebaseSyncService = {
 
       // Primary top-level Notes write
       await setDoc(doc(db, 'Notes', noteId), noteDocument, { merge: true });
+      console.log(`[Smart Notes] Firestore note created: ${noteId}`);
 
       // Subcollection users/{uid}/notes write
       try {
@@ -267,7 +277,7 @@ export const firebaseSyncService = {
         console.warn('[Smart Notes] IndexedDB local save fallback:', e);
       }
 
-      console.log(`[Smart Notes] Note created: ${noteId}`);
+      console.log('[Smart Notes] Save completed successfully');
       return {
         success: true,
         noteId: noteId,
@@ -280,8 +290,8 @@ export const firebaseSyncService = {
         stack: error?.stack,
       });
 
-      let userFriendlyMessage = error?.message || 'Failed to save screenshot: Unknown error';
-      if (!auth.currentUser || error?.message?.includes('sign in')) {
+      let userFriendlyMessage = error?.message || 'The clip could not be saved to Smart Notes.';
+      if (!auth?.currentUser || error?.message?.includes('sign in')) {
         userFriendlyMessage = 'Please sign in before saving to Smart Notes.';
       } else if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
         userFriendlyMessage = 'Firestore denied permission to create this note.';
@@ -329,13 +339,32 @@ export const firebaseSyncService = {
 
   // Save clip under secure user path: users/{userId}/clips/{clipId}
   async saveNoteToSmartNotes(note: EuclidNote, userId: string): Promise<boolean> {
+    console.log('[Smart Notes] Starting Firestore save for clip:', note.id);
     try {
+      if (auth?.authStateReady) {
+        await auth.authStateReady();
+      }
+
+      const currentUser = auth?.currentUser;
+      if (!currentUser) {
+        throw new Error('Please sign in before saving to Smart Notes.');
+      }
+
+      const uid = currentUser.uid || userId;
+      console.log('[Firebase Debug] Project:', firebaseConfig.projectId);
+      console.log('[Firebase Debug] User:', uid);
+      console.log('[Firebase Debug] Firestore save started');
+      console.log('[Firebase Debug] Firestore document path:', `Notes/${note.id}`);
+
       const now = new Date().toISOString();
       const clipPayload = {
         id: note.id,
-        userId: userId,
+        userId: uid,
+        user_id: uid,
         createdAt: note.created_at || now,
         updatedAt: now,
+        created_at: note.created_at || now,
+        updated_at: now,
         sourceType: note.clipFormat || 'bookmark',
         sourceUrl: note.sourceUrl || '',
         title: note.title,
@@ -349,29 +378,41 @@ export const firebaseSyncService = {
         tags: note.tags || [],
         notebook_id: note.notebook_id || null,
         folder_id: note.folder_id || null,
+        is_deleted: false,
+        is_archived: false,
+        is_pinned: false,
+        is_favorite: false,
+        syncStatus: 'synced',
+        lastSyncedAt: now,
       };
 
-      // Primary store: users/{uid}/clips/{clipId}
-      await setDoc(doc(db, 'users', userId, 'clips', note.id), clipPayload, { merge: true });
+      // Top-level Notes collection write
+      await setDoc(doc(db, 'Notes', note.id), clipPayload, { merge: true });
+      console.log('[Smart Notes] Firestore note created:', note.id);
 
-      // Dual store for Smart Notes app integration: Notes/{clipId}
+      // Primary store: users/{uid}/clips/{clipId}
       try {
-        const legacyPayload = {
-          ...note,
-          user_id: userId,
-          updated_at: now,
-          lastSyncedAt: now,
-          syncStatus: 'synced',
-        };
-        await setDoc(doc(db, 'Notes', note.id), legacyPayload, { merge: true });
+        await setDoc(doc(db, 'users', uid, 'clips', note.id), clipPayload, { merge: true });
       } catch (err) {
-        console.warn('Dual Notes collection write fallback:', err);
+        console.warn('Subcollection clips write fallback:', err);
       }
 
+      // Subcollection users/{uid}/notes/{clipId}
+      try {
+        await setDoc(doc(db, 'users', uid, 'notes', note.id), clipPayload, { merge: true });
+      } catch (err) {
+        console.warn('Subcollection notes write fallback:', err);
+      }
+
+      console.log('[Smart Notes] Save completed successfully');
       return true;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${userId}/clips/${note.id}`);
-      return false;
+    } catch (error: any) {
+      console.error('[Smart Notes] Save failed', {
+        code: error?.code,
+        message: error?.message,
+        stack: error?.stack,
+      });
+      throw error;
     }
   },
 

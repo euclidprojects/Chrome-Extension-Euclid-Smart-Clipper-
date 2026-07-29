@@ -752,12 +752,11 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       'Sanitizing content...',
       localOnly ? 'Saving locally...' : 'Uploading assets...',
       'Creating Smart Notes note...',
-      'Saved successfully!',
     ];
 
     for (let i = 0; i < steps.length; i++) {
       setSaveStepMessage(steps[i]);
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
     try {
@@ -866,6 +865,7 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       }
 
       await onSaveNote(noteToSave);
+      setSaveStepMessage('Saved to Smart Notes!');
       setIsSaving(false);
       setSavedNoteId(newNoteId);
     } catch (err: any) {

@@ -434,9 +434,12 @@ export const ScreenshotEditorView: React.FC<ScreenshotEditorViewProps> = ({
     setSaveStepMessage('Confirming authentication...');
 
     try {
+      if (auth?.authStateReady) {
+        await auth.authStateReady();
+      }
       const user = auth.currentUser;
       if (!user) {
-        throw new Error('You must sign in before saving to Smart Notes.');
+        throw new Error('Please sign in before saving to Smart Notes.');
       }
 
       console.log('[Smart Notes] Save started');

@@ -297,13 +297,11 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
       'Extracting page content…',
       saveOption === 'local_only' ? 'Saving locally…' : 'Uploading assets…',
       'Creating Smart Notes note…',
-      'Synchronizing annotations…',
-      'Clip saved',
     ];
 
     for (let i = 0; i < steps.length; i++) {
       setSaveStepMessage(steps[i]);
-      await new Promise((resolve) => setTimeout(resolve, 280));
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
     try {
@@ -343,6 +341,7 @@ export const AnnotationPanel: React.FC<AnnotationPanelProps> = ({
       };
 
       await onSaveNote(noteToSave);
+      setSaveStepMessage('Clip saved to Smart Notes!');
       setIsSaving(false);
       setSavedNoteId(newNoteId);
     } catch (err: any) {

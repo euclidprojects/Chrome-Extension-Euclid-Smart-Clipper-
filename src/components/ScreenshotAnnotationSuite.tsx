@@ -116,6 +116,9 @@ export const ScreenshotAnnotationSuite: React.FC<ScreenshotAnnotationSuiteProps>
   const handleSaveAnnotatedScreenshot = async () => {
     setIsSaving(true);
     try {
+      if (auth?.authStateReady) {
+        await auth.authStateReady();
+      }
       const user = auth.currentUser;
       if (!user) {
         alert('Please sign in before saving to Smart Notes.');

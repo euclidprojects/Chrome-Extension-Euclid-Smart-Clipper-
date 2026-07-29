@@ -221,9 +221,15 @@ export const VideoNotesWorkspace: React.FC<VideoNotesWorkspaceProps> = ({
       updated_at: new Date().toISOString(),
     };
 
-    await onSaveNote(noteToSave);
-    setIsSaving(false);
-    setSavedNoteId(noteId);
+    try {
+      await onSaveNote(noteToSave);
+      setIsSaving(false);
+      setSavedNoteId(noteId);
+    } catch (err: any) {
+      console.error('[Smart Notes] Video Note save error:', err);
+      setIsSaving(false);
+      alert(err?.message || 'Failed to save Video Note to Smart Notes.');
+    }
   };
 
   return (

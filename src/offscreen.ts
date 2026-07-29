@@ -1,7 +1,14 @@
 console.info("[Offscreen] Script loaded");
 
 const AUTH_PAGE_URL = "https://euclidprojects.org/extension-auth/";
-const AUTH_PAGE_ORIGIN = new URL(AUTH_PAGE_URL).origin;
+const AUTH_PAGE_ORIGIN = "https://euclidprojects.org";
+
+let hostedPageReady = false;
+let resolveHostedPageReady: (() => void) | null = null;
+
+const hostedPageReadyPromise = new Promise<void>((resolve) => {
+  resolveHostedPageReady = resolve;
+});
 
 let authIframe: HTMLIFrameElement | null = null;
 let authIframeReadyPromise: Promise<HTMLIFrameElement> | null = null;
@@ -11,6 +18,8 @@ function ensureAuthIframe(): Promise<HTMLIFrameElement> {
     return authIframeReadyPromise;
   }
 
+  console.log("[Offscreen] Creating hosted iframe", { url: AUTH_PAGE_URL });
+
   authIframe = document.createElement("iframe");
   authIframe.src = AUTH_PAGE_URL;
   authIframe.hidden = true;
@@ -18,7 +27,10 @@ function ensureAuthIframe(): Promise<HTMLIFrameElement> {
   authIframeReadyPromise = new Promise((resolve, reject) => {
     authIframe!.addEventListener(
       "load",
-      () => resolve(authIframe!),
+      () => {
+        console.log("[Offscreen] Hosted iframe load event");
+        resolve(authIframe!);
+      },
       { once: true }
     );
 
@@ -32,6 +44,39 @@ function ensureAuthIframe(): Promise<HTMLIFrameElement> {
   document.documentElement.appendChild(authIframe);
 
   return authIframeReadyPromise;
+}
+
+globalThis.addEventListener("message", (event) => {
+  if (
+    event.origin === AUTH_PAGE_ORIGIN &&
+    authIframe &&
+    event.source === authIframe.contentWindow
+  ) {
+    let payload = event.data;
+    if (typeof payload === "string") {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        return;
+      }
+    }
+    if (payload?.type === "EUCLID_HOSTED_AUTH_READY") {
+      if (!hostedPageReady) {
+        hostedPageReady = true;
+        resolveHostedPageReady?.();
+        console.log("[Offscreen] Hosted authentication page ready");
+      }
+    }
+  }
+});
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    })
+  ]);
 }
 
 const AUTH_TIMEOUT_MS = 120000;
@@ -52,6 +97,14 @@ async function performHostedGoogleSignIn(): Promise<{ credential: any }> {
 async function runHostedGoogleSignIn(): Promise<{ credential: any }> {
   console.info("[Offscreen] Waiting for hosted iframe");
   const iframeEl = await ensureAuthIframe();
+
+  console.info("[Offscreen] Waiting for hosted authentication page ready handshake");
+  await withTimeout(
+    hostedPageReadyPromise,
+    10000,
+    "The hosted authentication page loaded but did not initialize. Check /extension-auth/, its JavaScript, CSP and iframe headers."
+  );
+
   console.info("[Offscreen] Hosted iframe ready");
 
   const requestId = crypto.randomUUID();

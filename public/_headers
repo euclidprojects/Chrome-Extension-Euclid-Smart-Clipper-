@@ -1,0 +1,3 @@
+/extension-auth/*
+  ! X-Frame-Options
+  Content-Security-Policy: frame-ancestors chrome-extension://adgadgaalgjmkikplcdlnejpimmebgmm;

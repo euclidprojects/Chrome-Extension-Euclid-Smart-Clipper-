@@ -3,7 +3,7 @@
 
 import { isSupportedPage } from '../utils/pageUtils';
 import { auth } from '../lib/firebase';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth/web-extension';
+import { OAuthCredential, signInWithCredential } from 'firebase/auth/web-extension';
 import { getCurrentExtensionOrigin, checkExtensionIdMatch } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
@@ -100,28 +100,47 @@ async function handleGoogleSignIn(): Promise<{ success: boolean; user?: any; idT
     );
   });
 
-  if (!response) {
-    throw new Error('The offscreen authentication document returned no response.');
-  }
-
-  if (!response.success) {
-    const rawErr = response.error;
+  if (!response?.success) {
+    const rawErr = response?.error;
     const errMsg = typeof rawErr === 'object' ? rawErr?.message : typeof rawErr === 'string' ? rawErr : 'Google authentication failed.';
     const err = new Error(errMsg || 'Google authentication failed.');
-    (err as any).code = typeof rawErr === 'object' ? rawErr?.code : 'auth/offscreen-error';
+    (err as any).code = typeof rawErr === 'object' ? rawErr?.code : 'auth/google-auth-failed';
     throw err;
   }
 
-  if (response.idToken && auth) {
-    try {
-      const credential = GoogleAuthProvider.credential(response.idToken);
-      await signInWithCredential(auth, credential);
-    } catch (e) {
-      console.warn('[Background] Firebase extension signInWithCredential warning:', e);
-    }
+  if (!response.credential || typeof response.credential !== 'object') {
+    throw new Error('Google authentication returned no serialized credential.');
   }
 
-  return response;
+  const credential = OAuthCredential.fromJSON(response.credential);
+  if (!credential) {
+    throw new Error('The serialized Google OAuth credential is invalid.');
+  }
+
+  if (!auth) {
+    throw new Error('Firebase Auth is not initialized in the service worker.');
+  }
+
+  const userCredential = await signInWithCredential(auth, credential);
+  const user = userCredential.user;
+
+  if (!user?.uid) {
+    throw new Error('Firebase authentication returned no user UID.');
+  }
+
+  const firebaseIdToken = await user.getIdToken();
+
+  return {
+    success: true,
+    user: {
+      uid: user.uid,
+      displayName: user.displayName || null,
+      email: user.email || null,
+      photoURL: user.photoURL || null,
+      emailVerified: Boolean(user.emailVerified)
+    },
+    idToken: firebaseIdToken
+  };
 }
 
 // ---------------------------------------------------------------------------

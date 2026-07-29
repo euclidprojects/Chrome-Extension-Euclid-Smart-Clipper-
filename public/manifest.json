@@ -50,7 +50,8 @@
     "https://*.firebaseapp.com/*",
     "https://*.firebaseio.com/*",
     "https://*.googleapis.com/*",
-    "https://*.euclidprojects.org/*"
+    "https://*.euclidprojects.org/*",
+    "https://euclidprojects.org/*"
   ],
 
   "background": {

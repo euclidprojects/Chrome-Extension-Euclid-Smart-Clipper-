@@ -24,6 +24,7 @@ import {
   localTagRepo,
 } from './storage/indexedDB';
 import { firebaseAuthService, firebaseSyncService } from './services/firebaseService';
+import { auth, firebaseConfig } from './firebase/config';
 
 export default function App() {
   // App View Mode
@@ -34,7 +35,7 @@ export default function App() {
   // User & Sync State
   const [user, setUser] = useState<EuclidUser | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('Connecting…');
 
   // Core Data
   const [notes, setNotes] = useState<EuclidNote[]>([]);
@@ -50,28 +51,85 @@ export default function App() {
     const unsubscribe = firebaseAuthService.onAuthChange((authUser) => {
       setUser(authUser);
       setIsLoadingAuth(false);
+      if (!authUser) {
+        setSyncStatus('Sign in required');
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  // Real-time Firestore Notes Subscription for authenticated user
+  // Real-time Firestore Notes & Notebooks Subscription for authenticated user
   useEffect(() => {
-    if (!user || !user.uid) return;
+    if (!user || !user.uid) {
+      setSyncStatus('Sign in required');
+      return;
+    }
 
-    const unsubscribe = firebaseSyncService.subscribeToUserNotes(user.uid, async (remoteNotes) => {
-      console.log(`[Smart Notes] Real-time listener received ${remoteNotes.length} notes from Firestore`);
-      for (const remoteNote of remoteNotes) {
-        try {
-          await localNoteRepo.save(remoteNote);
-        } catch (err) {
-          console.warn('[Smart Notes] Local repo merge warning:', err);
-        }
+    setSyncStatus('Connecting…');
+
+    let unsubNotes: (() => void) | undefined;
+    let unsubNotebooks: (() => void) | undefined;
+
+    const startListeners = async () => {
+      if (auth?.authStateReady) {
+        await auth.authStateReady();
       }
-      const updatedNotes = await localNoteRepo.getAll();
-      setNotes(updatedNotes);
-    });
+      const currentUser = auth?.currentUser;
+      if (!currentUser) {
+        console.warn('[Smart Notes] No authenticated user');
+        setSyncStatus('Sign in required');
+        return;
+      }
 
-    return () => unsubscribe();
+      console.log('[Firebase Debug] Auth UID:', currentUser.uid);
+      console.log('[Firebase Debug] Project ID:', firebaseConfig.projectId);
+
+      unsubNotes = firebaseSyncService.subscribeToUserNotes(
+        currentUser.uid,
+        async (remoteNotes) => {
+          console.log(`[Smart Notes] Real-time listener received ${remoteNotes.length} notes from Firestore`);
+          for (const remoteNote of remoteNotes) {
+            try {
+              await localNoteRepo.save(remoteNote);
+            } catch (err) {
+              console.warn('[Smart Notes] Local repo merge warning:', err);
+            }
+          }
+          const updatedNotes = await localNoteRepo.getAll();
+          setNotes(updatedNotes);
+          setSyncStatus('Connected to Smart Notes');
+        },
+        (err) => {
+          if (err?.code === 'permission-denied') {
+            setSyncStatus('Permission denied');
+          } else if (err?.code === 'unavailable') {
+            setSyncStatus('Offline');
+          } else {
+            setSyncStatus('Sync failed');
+          }
+        }
+      );
+
+      unsubNotebooks = firebaseSyncService.subscribeToUserNotebooks(
+        currentUser.uid,
+        async (remoteNotebooks) => {
+          console.log(`[Smart Notes] Real-time listener received ${remoteNotebooks.length} notebooks from Firestore`);
+          if (remoteNotebooks.length > 0) {
+            setNotebooks(remoteNotebooks);
+          }
+        },
+        (err) => {
+          console.warn('[Smart Notes] Notebooks listener warning:', err);
+        }
+      );
+    };
+
+    startListeners();
+
+    return () => {
+      if (unsubNotes) unsubNotes();
+      if (unsubNotebooks) unsubNotebooks();
+    };
   }, [user?.uid]);
 
   const handleSignOut = async () => {
@@ -122,20 +180,32 @@ export default function App() {
 
   // Save Note Handler
   const handleSaveNote = async (note: EuclidNote): Promise<string | boolean> => {
-    setSyncStatus('uploading');
+    setSyncStatus('Saving…');
 
     // 1. Save to local IndexedDB
     await localNoteRepo.save(note);
 
-    // 2. Sync to Firebase if connected
-    if (user?.connectedToSmartNotes) {
-      await firebaseSyncService.saveNoteToSmartNotes(note, user.uid);
+    // 2. Sync to Firebase if user is authenticated
+    try {
+      if (user && user.uid) {
+        await firebaseSyncService.saveNoteToSmartNotes(note, user.uid);
+      }
+      setSyncStatus('Saved to Smart Notes');
+    } catch (err: any) {
+      console.error('[Smart Notes] Save error:', err);
+      if (err?.code === 'permission-denied') {
+        setSyncStatus('Permission denied');
+      } else if (err?.code === 'unavailable') {
+        setSyncStatus('Offline');
+      } else {
+        setSyncStatus('Sync failed');
+      }
+      throw err;
     }
 
     // Update state
     const updated = await localNoteRepo.getAll();
     setNotes(updated);
-    setSyncStatus('synced');
 
     return note.id;
   };
@@ -257,6 +327,7 @@ export default function App() {
       <div className="clipper-popup">
         <ClippingWorkspace
           user={user}
+          syncStatusMessage={syncStatus}
           onSignOut={handleSignOut}
           notebooks={notebooks}
           folders={folders}
@@ -293,6 +364,7 @@ export default function App() {
         {activeView === 'sidepanel' ? (
           <ClippingWorkspace
             user={user}
+            syncStatusMessage={syncStatus}
             onSignOut={handleSignOut}
             notebooks={notebooks}
             folders={folders}

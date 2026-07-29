@@ -58,6 +58,7 @@ import {
 
 interface ClippingWorkspaceProps {
   user?: EuclidUser | null;
+  syncStatusMessage?: string;
   onSignOut?: () => void;
   notebooks: EuclidNotebook[];
   folders: EuclidFolder[];
@@ -77,6 +78,7 @@ export type ClipFormatType = ClipType;
 
 export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   user,
+  syncStatusMessage,
   onSignOut,
   notebooks,
   folders,
@@ -1993,7 +1995,17 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         </div>
 
         <div className="flex items-center gap-2 font-medium">
-          <span className="text-emerald-400">Synced to Smart Notes</span>
+          <span className={
+            syncStatusMessage === 'Connected to Smart Notes' || syncStatusMessage === 'Saved to Smart Notes'
+              ? 'text-emerald-400'
+              : syncStatusMessage === 'Saving…' || syncStatusMessage === 'Connecting…'
+              ? 'text-amber-400'
+              : syncStatusMessage === 'Sign in required'
+              ? 'text-slate-400'
+              : 'text-red-400'
+          }>
+            {syncStatusMessage || (user ? 'Connected to Smart Notes' : 'Sign in required')}
+          </span>
         </div>
       </footer>
     </div>

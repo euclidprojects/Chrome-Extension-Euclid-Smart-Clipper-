@@ -20,7 +20,7 @@ import { AccountMenu } from './AccountMenu';
 
 interface HeaderProps {
   user: EuclidUser | null;
-  syncStatus: SyncStatus;
+  syncStatus: SyncStatus | string;
   activeView: 'popup' | 'sidepanel' | 'dashboard' | 'video' | 'annotation' | 'recording' | 'settings';
   setActiveView: (view: any) => void;
   onConnectAccount: () => void;

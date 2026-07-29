@@ -101,6 +101,14 @@ export type EuclidNoteType =
   | 'task';
 
 export type SyncStatus =
+  | 'Connecting…'
+  | 'Sign in required'
+  | 'Connected to Smart Notes'
+  | 'Saving…'
+  | 'Saved to Smart Notes'
+  | 'Sync failed'
+  | 'Permission denied'
+  | 'Offline'
   | 'local_only'
   | 'queued'
   | 'uploading'

@@ -307,11 +307,20 @@ export const firebaseSyncService = {
   },
 
   // Real-time listener for user's Smart Notes
-  subscribeToUserNotes(userId: string, callback: (notes: EuclidNote[]) => void): () => void {
+  subscribeToUserNotes(
+    userId: string,
+    callback: (notes: EuclidNote[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    console.log('[Smart Notes] Listener path: Notes');
+    console.log('[Smart Notes] Listener UID:', userId);
+    console.log('[Smart Notes] Query ownership field: user_id');
+
     const q = query(collection(db, 'Notes'), where('user_id', '==', userId));
     return onSnapshot(
       q,
       (snapshot) => {
+        console.log('[Smart Notes] Notes received:', snapshot.size);
         const notes: EuclidNote[] = [];
         snapshot.forEach((d) => {
           notes.push({ id: d.id, ...d.data() } as EuclidNote);
@@ -319,7 +328,42 @@ export const firebaseSyncService = {
         callback(notes);
       },
       (err) => {
-        console.warn('[Smart Notes] Snapshot listener warning:', err);
+        console.error('[Smart Notes] Notes listener failed:', {
+          code: err.code,
+          message: err.message,
+        });
+        if (onError) onError(err);
+      }
+    );
+  },
+
+  // Real-time listener for user's Notebooks
+  subscribeToUserNotebooks(
+    userId: string,
+    callback: (notebooks: EuclidNotebook[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    console.log('[Smart Notes] Listener path: notebooks');
+    console.log('[Smart Notes] Listener UID:', userId);
+    console.log('[Smart Notes] Query ownership field: userId');
+
+    const q = query(collection(db, 'notebooks'), where('userId', '==', userId));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        console.log('[Smart Notes] Notebooks received:', snapshot.size);
+        const notebooks: EuclidNotebook[] = [];
+        snapshot.forEach((d) => {
+          notebooks.push({ id: d.id, ...d.data() } as EuclidNotebook);
+        });
+        callback(notebooks);
+      },
+      (err) => {
+        console.error('[Smart Notes] Notebooks listener failed:', {
+          code: err.code,
+          message: err.message,
+        });
+        if (onError) onError(err);
       }
     );
   },

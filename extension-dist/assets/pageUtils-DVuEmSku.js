@@ -1,0 +1,1 @@
+function e(s){if(!s)return!1;const t=s.toLowerCase().trim();return!(!t.startsWith("http://")&&!t.startsWith("https://")||t.startsWith("https://chromewebstore.google.com/")||t.startsWith("https://chrome.google.com/webstore/")||t.startsWith("chrome://")||t.startsWith("chrome-extension://")||t.startsWith("edge://")||t.startsWith("about:"))}export{e as i};

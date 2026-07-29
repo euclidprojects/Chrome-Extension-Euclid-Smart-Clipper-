@@ -15,7 +15,7 @@ import { EuclidUser, SyncStatus } from '../types';
 
 interface AccountMenuProps {
   user: EuclidUser;
-  syncStatus?: SyncStatus;
+  syncStatus?: SyncStatus | string;
   onSignOut: () => void;
   onOpenSettings?: () => void;
   onOpenSmartNotes?: () => void;

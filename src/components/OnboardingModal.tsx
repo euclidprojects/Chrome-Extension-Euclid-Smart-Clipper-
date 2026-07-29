@@ -52,7 +52,15 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => 
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-2xl bg-indigo-600 p-0.5 shadow-[0_0_15px_rgba(99,102,241,0.5)] flex items-center justify-center">
-              <img src="/icons/icon32.png" alt="Icon" className="w-7 h-7" />
+              <img
+                src={typeof chrome !== 'undefined' && chrome?.runtime?.getURL ? chrome.runtime.getURL('icons/icon32.png') : '/icons/icon32.png'}
+                alt="Icon"
+                className="w-7 h-7"
+                onError={(e) => {
+                  console.error('[Icon Debug] Failed to load logo in OnboardingModal:', e.currentTarget.src);
+                  e.currentTarget.src = '/icons/icon32.png';
+                }}
+              />
             </div>
             <div>
               <h3 className="font-bold text-sm text-white">Euclid Smart Clipper</h3>

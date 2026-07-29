@@ -43,7 +43,15 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-3">
         <div className="relative group cursor-pointer" onClick={() => setActiveView('popup')}>
           <div className="w-10 h-10 rounded-xl bg-indigo-600 p-1 shadow-[0_0_15px_rgba(99,102,241,0.35)] border border-indigo-400/30 flex items-center justify-center transition-transform group-hover:scale-105">
-            <img src="/icons/icon32.png" alt="Euclid Logo" className="w-7 h-7 object-contain brightness-110" />
+            <img
+              src={typeof chrome !== 'undefined' && chrome?.runtime?.getURL ? chrome.runtime.getURL('icons/icon32.png') : '/icons/icon32.png'}
+              alt="Euclid Logo"
+              className="w-7 h-7 object-contain brightness-110"
+              onError={(e) => {
+                console.error('[Icon Debug] Failed to load logo in Header:', e.currentTarget.src);
+                e.currentTarget.src = '/icons/icon32.png';
+              }}
+            />
           </div>
           <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-[#0F1115] animate-pulse shadow-[0_0_8px_#4ade80]" />
         </div>

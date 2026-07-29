@@ -46,6 +46,32 @@ export default function App() {
   // Onboarding
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
 
+  // Icon Diagnostics
+  useEffect(() => {
+    if (typeof chrome !== 'undefined' && chrome?.runtime?.getURL) {
+      try {
+        const iconUrl = chrome.runtime.getURL('icons/icon128.png');
+        console.log('[Icon Debug] Extension icon URL:', iconUrl);
+        fetch(iconUrl)
+          .then((response) => {
+            console.log('[Icon Debug] Icon response:', {
+              ok: response.ok,
+              status: response.status,
+              url: response.url,
+            });
+            if (!response.ok) {
+              throw new Error(`Icon returned HTTP ${response.status}`);
+            }
+          })
+          .catch((error) => {
+            console.error('[Icon Debug] Icon failed:', error);
+          });
+      } catch (err) {
+        console.warn('[Icon Debug] Diagnostic fetch exception:', err);
+      }
+    }
+  }, []);
+
   // Auth Subscription
   useEffect(() => {
     const unsubscribe = firebaseAuthService.onAuthChange((authUser) => {

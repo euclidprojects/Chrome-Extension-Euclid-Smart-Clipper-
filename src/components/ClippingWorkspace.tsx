@@ -906,7 +906,15 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
       <header className="h-[46px] px-3 bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-950 border-b border-emerald-700/60 flex items-center justify-between shrink-0 shadow-lg sticky top-0 z-30">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-6.5 h-6.5 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 p-0.5 shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-amber-300/60 flex items-center justify-center shrink-0">
-            <img src="/icons/icon32.png" alt="Euclid Logo" className="w-3.5 h-3.5 object-contain" />
+            <img
+              src={typeof chrome !== 'undefined' && chrome?.runtime?.getURL ? chrome.runtime.getURL('icons/icon32.png') : '/icons/icon32.png'}
+              alt="Euclid Logo"
+              className="w-3.5 h-3.5 object-contain"
+              onError={(e) => {
+                console.error('[Icon Debug] Failed to load logo in ClippingWorkspace:', e.currentTarget.src);
+                e.currentTarget.src = '/icons/icon32.png';
+              }}
+            />
           </div>
           <div className="min-w-0">
             <h1 className="font-extrabold text-[14px] text-white tracking-tight leading-tight flex items-center gap-1.5 truncate">

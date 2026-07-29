@@ -3,20 +3,33 @@ import path from 'path';
 import https from 'https';
 import sharp from 'sharp';
 
-const publicIconsDir = path.join(process.cwd(), 'public-extension', 'icons');
-const distIconsDir = path.join(process.cwd(), 'extension-dist', 'icons');
+const rootDir = process.cwd();
+const publicIconsDir = path.join(rootDir, 'public', 'icons');
+const publicExtIconsDir = path.join(rootDir, 'public-extension', 'icons');
+const distExtIconsDir = path.join(rootDir, 'extension-dist', 'icons');
+const distIconsDir = path.join(rootDir, 'dist', 'icons');
 
-if (!fs.existsSync(publicIconsDir)) fs.mkdirSync(publicIconsDir, { recursive: true });
-if (!fs.existsSync(distIconsDir)) fs.mkdirSync(distIconsDir, { recursive: true });
+const dirs = [publicIconsDir, publicExtIconsDir, distExtIconsDir, distIconsDir];
+for (const dir of dirs) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
 
-const masterPath = path.join(publicIconsDir, 'official_master.png');
+const masterPath = path.join(publicExtIconsDir, 'official_master.png');
+const rootMasterPath = path.join(rootDir, 'official_icon.png');
 const officialUrl = 'https://i.postimg.cc/KzT17zDf/clipper-Chat-GPT-Image-Jul-25-2026-12-46-06-PM.png';
 
 async function downloadMasterIfNeeded() {
   if (fs.existsSync(masterPath)) {
     const buf = fs.readFileSync(masterPath);
-    // Verify valid PNG header
     if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      return;
+    }
+  }
+
+  if (fs.existsSync(rootMasterPath)) {
+    const buf = fs.readFileSync(rootMasterPath);
+    if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      fs.copyFileSync(rootMasterPath, masterPath);
       return;
     }
   }
@@ -50,15 +63,18 @@ async function main() {
 
   const sizes = [16, 32, 48, 128, 512];
   for (const s of sizes) {
-    const pubTarget = path.join(publicIconsDir, `icon${s}.png`);
-    const distTarget = path.join(distIconsDir, `icon${s}.png`);
+    const tempFile = path.join(publicExtIconsDir, `icon${s}.png`);
 
     await sharp(masterPath)
       .resize(s, s, { fit: 'fill' })
       .toFormat('png')
-      .toFile(pubTarget);
+      .toFile(tempFile);
 
-    fs.copyFileSync(pubTarget, distTarget);
+    for (const dir of dirs) {
+      const target = path.join(dir, `icon${s}.png`);
+      fs.copyFileSync(tempFile, target);
+    }
+
     console.log(`Generated official PNG icon${s}.png (${s}x${s})`);
   }
 }
@@ -67,4 +83,5 @@ main().catch((err) => {
   console.error('Error generating icons:', err);
   process.exit(1);
 });
+
 

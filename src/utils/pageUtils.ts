@@ -2,6 +2,9 @@
  * Page validation helper for Euclid Smart Clipper.
  * Validates whether a given URL is supported for capturing or annotating.
  */
+export const PROTECTED_PAGE_ERROR_MESSAGE =
+  "Euclid Smart Clipper cannot access this protected browser page. Open a regular webpage and try again.";
+
 export function isSupportedPage(url?: string): boolean {
   if (!url) return false;
 

@@ -44,7 +44,8 @@ import {
 } from '../types';
 import { AccountMenu } from './AccountMenu';
 import { clippingService } from '../services/clippingService';
-import { isSupportedPage } from '../utils/pageUtils';
+import { isSupportedPage, PROTECTED_PAGE_ERROR_MESSAGE } from '../utils/pageUtils';
+import { ensureContentScriptInTab } from '../utils/extensionUtils';
 import {
   extractYouTubeVideoId,
   extractYouTubePlaylistId,
@@ -183,9 +184,10 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
   const seekYouTubeVideo = (seconds: number) => {
     if (seconds < 0) return;
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.sendMessage) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const activeTab = tabs[0];
         if (activeTab?.id) {
+          await ensureContentScriptInTab(activeTab.id);
           chrome.tabs.sendMessage(
             activeTab.id,
             { type: 'SEEK_YOUTUBE_VIDEO', seconds },
@@ -345,10 +347,14 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
           }
 
           if (activeTab.id) {
-            chrome.tabs.sendMessage(activeTab.id, { type: 'DETECT_MEDIA' }, (res) => {
-              if (chrome.runtime.lastError) return;
-              if (res?.success && res.data) {
-                setHasVideo(res.data.videoCount > 0 || res.data.isYouTube);
+            ensureContentScriptInTab(activeTab.id).then((ready) => {
+              if (ready && activeTab.id) {
+                chrome.tabs.sendMessage(activeTab.id, { type: 'DETECT_MEDIA' }, (res) => {
+                  if (chrome.runtime.lastError) return;
+                  if (res?.success && res.data) {
+                    setHasVideo(res.data.videoCount > 0 || res.data.isYouTube);
+                  }
+                });
               }
             });
           }
@@ -419,19 +425,23 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
             }
 
             if (activeTab.id) {
-              chrome.tabs.sendMessage(
-                activeTab.id,
-                { type: 'GET_YOUTUBE_METADATA' },
-                (res) => {
-                  if (chrome.runtime.lastError) return;
-                  if (res?.success && res?.data) {
-                    if (res.data.channelName) setYtChannelName(res.data.channelName);
-                    if (res.data.title) {
-                      setYtVideoTitle(res.data.title);
+              ensureContentScriptInTab(activeTab.id).then((ready) => {
+                if (ready && activeTab.id) {
+                  chrome.tabs.sendMessage(
+                    activeTab.id,
+                    { type: 'GET_YOUTUBE_METADATA' },
+                    (res) => {
+                      if (chrome.runtime.lastError) return;
+                      if (res?.success && res?.data) {
+                        if (res.data.channelName) setYtChannelName(res.data.channelName);
+                        if (res.data.title) {
+                          setYtVideoTitle(res.data.title);
+                        }
+                      }
                     }
-                  }
+                  );
                 }
-              );
+              });
             }
           } else {
             if (forced) {
@@ -532,24 +542,28 @@ export const ClippingWorkspace: React.FC<ClippingWorkspaceProps> = ({
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const activeTab = tabs[0];
           if (activeTab?.id) {
-            chrome.tabs.sendMessage(
-              activeTab.id,
-              { type: 'GET_VIDEO_TIMESTAMP' },
-              (res) => {
-                if (chrome.runtime.lastError) return;
-                if (res?.success && res?.data) {
-                  const { currentTime, duration, formattedTime } = res.data;
-                  if (typeof duration === 'number' && duration > 0) {
-                    setYtVideoDuration(duration);
+            ensureContentScriptInTab(activeTab.id).then((ready) => {
+              if (ready && activeTab.id) {
+                chrome.tabs.sendMessage(
+                  activeTab.id,
+                  { type: 'GET_VIDEO_TIMESTAMP' },
+                  (res) => {
+                    if (chrome.runtime.lastError) return;
+                    if (res?.success && res?.data) {
+                      const { currentTime, duration, formattedTime } = res.data;
+                      if (typeof duration === 'number' && duration > 0) {
+                        setYtVideoDuration(duration);
+                      }
+                      if (!isUserEditedYtTimestamp && typeof currentTime === 'number' && currentTime > 0) {
+                        const timeStr = formattedTime || formatSecondsToTimestamp(currentTime);
+                        setYtTimestamp(timeStr);
+                        setYtTimestampInputText(timeStr);
+                      }
+                    }
                   }
-                  if (!isUserEditedYtTimestamp && typeof currentTime === 'number' && currentTime > 0) {
-                    const timeStr = formattedTime || formatSecondsToTimestamp(currentTime);
-                    setYtTimestamp(timeStr);
-                    setYtTimestampInputText(timeStr);
-                  }
-                }
+                );
               }
-            );
+            });
           }
         });
       }

@@ -4,7 +4,7 @@
 import { isSupportedPage } from '../utils/pageUtils';
 import { auth } from '../lib/firebaseWorker';
 import { OAuthCredential, signInWithCredential } from 'firebase/auth';
-import { getCurrentExtensionOrigin, checkExtensionIdMatch } from '../utils/extensionUtils';
+import { getCurrentExtensionOrigin, checkExtensionIdMatch, ensureContentScriptInTab } from '../utils/extensionUtils';
 import { AuthMessages } from '../constants/auth';
 
 console.info("[Background] Service worker loaded", {
@@ -232,7 +232,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
 
   // Handle Context Menu Item Clicks
   if (chrome.contextMenus) {
-    chrome.contextMenus.onClicked.addListener((info, tab) => {
+    chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       if (!tab || !tab.id) return;
 
       if (!isSupportedPage(tab.url)) {
@@ -248,6 +248,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
         return;
       }
 
+      await ensureContentScriptInTab(tab.id);
+
       chrome.tabs.sendMessage(tab.id, {
         type: 'CONTEXT_MENU_CLICK',
         action: info.menuItemId,
@@ -262,8 +264,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime) {
   // Keyboard Command Listener
   if (chrome.commands?.onCommand) {
     chrome.commands.onCommand.addListener((command) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         if (tabs[0]?.id && isSupportedPage(tabs[0].url)) {
+          await ensureContentScriptInTab(tabs[0].id);
           chrome.tabs.sendMessage(tabs[0].id, {
             type: 'COMMAND_TRIGGERED',
             action: `command_${command}`
@@ -388,7 +391,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Trigger Region Selection on active tab
   if (message.type === 'START_REGION_SELECTION' || message.type === 'start_region_selection') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tab = tabs[0];
       if (!tab || !tab.id) {
         sendResponse({ success: false, error: 'No active tab found' });
@@ -403,20 +406,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      const csReady = await ensureContentScriptInTab(tab.id);
+      if (!csReady) {
+        sendResponse({
+          success: false,
+          error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
+        });
+        return;
+      }
+
       chrome.tabs.sendMessage(tab.id, { type: 'START_REGION_SELECTION' }, (response) => {
         if (chrome.runtime.lastError) {
-          chrome.scripting.executeScript({
-            target: { tabId: tab.id! },
-            files: ['contentScript.js'],
-          }).then(() => {
-            chrome.tabs.sendMessage(tab.id!, { type: 'START_REGION_SELECTION' }, (res2) => {
-              sendResponse(res2 || { success: true });
-            });
-          }).catch(() => {
-            sendResponse({
-              success: false,
-              error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
-            });
+          sendResponse({
+            success: false,
+            error: "This page cannot be captured or annotated because Chrome does not allow extensions to access it."
           });
         } else {
           sendResponse(response || { success: true });

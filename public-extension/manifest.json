@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Euclid Smart Clipper",
   "short_name": "Euclid Clipper",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Clip, annotate, capture, and save web content to Euclid Smart Notes.",
 
   "icons": {
@@ -10,6 +10,15 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+
+  "oauth2": {
+    "client_id": "1024604491016-aojbmkjpbokkpmmdiagnjogachlpkgem.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "openid"
+    ]
   },
 
   "action": {
@@ -34,7 +43,8 @@
     "sidePanel",
     "scripting",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
 
   "content_security_policy": {

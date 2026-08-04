@@ -43,13 +43,16 @@ export default defineConfig(({ command }) => {
       plugins: [react(), tailwindcss()],
       publicDir: 'public-extension',
       resolve: {
-        alias: {
-          '@': path.resolve(__dirname, '.'),
-        },
+        alias: [
+          { find: /^firebase\/auth$/, replacement: path.resolve(__dirname, 'node_modules/firebase/auth/web-extension/dist/esm/index.esm.js') },
+          { find: /^@firebase\/auth$/, replacement: path.resolve(__dirname, 'node_modules/firebase/auth/web-extension/dist/esm/index.esm.js') },
+          { find: '@', replacement: path.resolve(__dirname, '.') },
+        ],
       },
       build: {
         outDir: 'dist',
         emptyOutDir: true,
+        sourcemap: false,
         rollupOptions: {
           input: {
             popup: path.resolve(__dirname, 'popup.html'),

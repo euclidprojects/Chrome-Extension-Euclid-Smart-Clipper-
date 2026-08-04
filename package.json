@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "clean": "node scripts/clean-extension.mjs",
-    "build:extension": "node generate-pngs.js && BUILD_TARGET=extension vite build && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-screenshot-editor-fix.mjs && node scripts/verify-extension-build.mjs",
+    "build:extension": "node generate-pngs.js && BUILD_TARGET=extension vite build && esbuild src/content/contentScript.ts --bundle --outfile=dist/contentScript.js && node scripts/verify-popup-fix.mjs && node scripts/verify-ui-requirements.mjs && node scripts/verify-floating-toolbar-bug-fix.mjs && node scripts/verify-screenshot-editor-fix.mjs && node scripts/verify-extension-build.mjs && node scripts/verify-no-remote-code.mjs",
     "build:website": "BUILD_TARGET=website vite build && node scripts/verify-website-build.mjs",
     "build": "npm run clean && npm run build:extension && npm run build:website",
     "package:extension": "node scripts/package-extension.mjs",
-    "verify:package": "node scripts/verify-extension-package.mjs",
+    "verify:package": "node scripts/verify-extension-package.mjs && node scripts/verify-no-remote-code.mjs",
     "release": "npm run build && npm run package:extension && npm run verify:package",
     "package": "npm run release",
     "test": "node scripts/verify-ui-requirements.mjs",

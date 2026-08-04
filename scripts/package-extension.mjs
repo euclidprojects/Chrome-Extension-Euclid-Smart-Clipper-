@@ -38,6 +38,20 @@ if (fs.existsSync(zipFilePath)) fs.rmSync(zipFilePath, { force: true });
 if (fs.existsSync(rootZipFilePath)) fs.rmSync(rootZipFilePath, { force: true });
 
 try {
+  // Remove any .map files from dist if present
+  function removeMaps(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        removeMaps(fullPath);
+      } else if (entry.name.endsWith('.map')) {
+        fs.rmSync(fullPath, { force: true });
+      }
+    }
+  }
+  removeMaps(distDir);
+
   const zip = new AdmZip();
   // Adds all files/folders inside dist/ directly to the ZIP root
   zip.addLocalFolder(distDir, '');

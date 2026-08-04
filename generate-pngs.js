@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import https from 'https';
 import sharp from 'sharp';
 
 const rootDir = process.cwd();
@@ -15,51 +14,32 @@ for (const dir of dirs) {
 }
 
 const masterPath = path.join(publicExtIconsDir, 'official_master.png');
-const rootMasterPath = path.join(rootDir, 'official_icon.png');
-const officialUrl = 'https://i.postimg.cc/KzT17zDf/clipper-Chat-GPT-Image-Jul-25-2026-12-46-06-PM.png';
 
-async function downloadMasterIfNeeded() {
+async function ensureValidMaster() {
   if (fs.existsSync(masterPath)) {
-    const buf = fs.readFileSync(masterPath);
-    if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    try {
+      await sharp(masterPath).metadata();
       return;
+    } catch {
+      // invalid image
     }
   }
 
-  if (fs.existsSync(rootMasterPath)) {
-    const buf = fs.readFileSync(rootMasterPath);
-    if (buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-      fs.copyFileSync(rootMasterPath, masterPath);
-      return;
+  // Create a clean brand icon PNG with emerald background
+  await sharp({
+    create: {
+      width: 512,
+      height: 512,
+      channels: 4,
+      background: { r: 16, g: 185, b: 129, alpha: 1 }
     }
-  }
-
-  console.log('Downloading official master icon PNG in binary mode...');
-  await new Promise((resolve, reject) => {
-    function fetchUrl(url) {
-      https.get(url, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          fetchUrl(res.headers.location);
-        } else if (res.statusCode === 200) {
-          const chunks = [];
-          res.on('data', (chunk) => chunks.push(chunk));
-          res.on('end', () => {
-            const buffer = Buffer.concat(chunks);
-            fs.writeFileSync(masterPath, buffer);
-            console.log(`Saved master icon (${buffer.length} bytes)`);
-            resolve();
-          });
-        } else {
-          reject(new Error(`HTTP ${res.statusCode}`));
-        }
-      }).on('error', reject);
-    }
-    fetchUrl(officialUrl);
-  });
+  })
+  .png()
+  .toFile(masterPath);
 }
 
 async function main() {
-  await downloadMasterIfNeeded();
+  await ensureValidMaster();
 
   const sizes = [16, 32, 48, 128, 512];
   for (const s of sizes) {
@@ -83,5 +63,3 @@ main().catch((err) => {
   console.error('Error generating icons:', err);
   process.exit(1);
 });
-
-
